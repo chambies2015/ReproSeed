@@ -16,7 +16,7 @@ from reproseed.artifacts import create_bundle, sha256
 from reproseed.cli import main
 from reproseed.config import Asset, OracleSpec, load_config
 from reproseed.inspection import escape_terminal
-from reproseed.oracle import OracleInterrupted, OracleResult, run_oracle
+from reproseed.oracle import OracleInterrupted, OracleInvocation, OracleResult, run_oracle
 
 
 def _bundle(
@@ -192,12 +192,17 @@ def test_text_distinguishes_unknown_interrupted_launch_from_known_executions(
 ) -> None:
     calls = 0
 
-    def interrupted(spec: OracleSpec, database: Path, assets: tuple[Asset, ...]) -> OracleResult:
+    def interrupted(
+        spec: OracleSpec,
+        database: Path,
+        assets: tuple[Asset, ...],
+        invocation: OracleInvocation | None = None,
+    ) -> OracleResult:
         nonlocal calls
         calls += 1
         if calls == 4:
             raise OracleInterrupted(None)
-        return run_oracle(spec, database, assets)
+        return run_oracle(spec, database, assets, invocation)
 
     monkeypatch.setattr("reproseed.workflow.run_oracle", interrupted)
     bundle, report = _bundle(tmp_path)

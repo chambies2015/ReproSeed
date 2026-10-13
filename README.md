@@ -2,7 +2,7 @@
 
 Smaller fixture. Same specified failure. Independently replayable evidence.
 
-ReproSeed is an M1b.1 prototype of a local Python CLI. It reduces a disposable SQLite
+ReproSeed is an M1b.1.1 prototype of a local Python CLI. It reduces a disposable SQLite
 fixture to a relationally valid row subset while reconfirming the explicit exit/marker
 contract supplied by the user. It exports a compact fixture, replay assets and evidence.
 It does not infer semantic crash equivalence. Reduction is not anonymization, and the
@@ -113,6 +113,14 @@ including a different crash, timeout or contradictory output. Baseline and compa
 artifact require three fresh confirmations each; a reduced candidate requires two. Final
 verification is reserved within the budget and never uses search caches.
 
+A handled first interruption during search stops further reduction and preserves coherent
+confirmed progress. ReproSeed then compacts that selection and requires three fresh target
+confirmations of the exact exported fixture before publishing. The report records interrupted
+search; this can still exit successfully. Interruption before baseline verification, during
+finalization or final verification, or again during graceful finalization may abort with exit
+130 and no verified bundle. A second interruption during invocation-accounting recovery
+aborts with exit 130. Existing outputs and supplied files are preserved.
+
 ## Support and limits
 
 SQLite >=3.37; ordinary rowid tables with one exact INTEGER PRIMARY KEY alias; single
@@ -161,3 +169,5 @@ mismatches require a fresh trusted bundle; editing manifest hashes does not esta
 See [CONTRIBUTING.md](CONTRIBUTING.md), [architecture](docs/architecture.md),
 [roadmap](docs/roadmap.md), [historical completion evidence](docs/m0-m1a-completion.md)
 and [M1b.1 evidence](docs/m1b1-completion.md).
+The [M1b.1.1 cancellation repair evidence](docs/m1b1-1-completion.md) distinguishes injected
+boundary tests from platform-specific real-signal tests and records their limits.

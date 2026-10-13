@@ -36,6 +36,19 @@ waiting indefinitely for pipe EOF. Platform execution evidence belongs in the mi
 completion reports. The accepted M1a.1 hosted run covers Ubuntu/Python 3.12 and 3.14 and
 Windows/Python 3.12 at its reviewed commit; it does not validate later working changes.
 
+A handled first search interruption stops reduction and preserves a coherent confirmed
+selection. Publication still requires compaction and three fresh TARGET_FAILURE confirmations
+of the exact exported fixture. Cancellation before baseline verification or during finalization
+can abort without publishing. A second interruption during invocation-accounting recovery
+aborts through CLI exit 130, preserving the boundary between unfinished accounting and a
+verified report; further interruptions are not swallowed indefinitely. Tool-owned partial
+output is cleaned up where possible, and pre-existing output is never replaced.
+Deterministic boundary injection tests this recovery behavior; real-signal coverage is reported
+separately with its platform in the [cancellation repair evidence](docs/m1b1-1-completion.md).
+[Python's signal exception note](https://docs.python.org/3.12/library/signal.html#note-on-signal-handlers-and-exceptions)
+explains why KeyboardInterrupt can arrive between operations. This is no guarantee against
+every asynchronous exception, forced termination, power loss or hostile process interference.
+
 ## Data and bundle sharing
 
 Reduction is not anonymization or sanitization. Retained values, schema, included code,

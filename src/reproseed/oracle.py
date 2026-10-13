@@ -279,12 +279,18 @@ def _kill_tree(process: subprocess.Popen[bytes], close_job: Callable[[], None] |
 
 
 @dataclass
-class _ExecutionState:
+class OracleInvocation:
+    """Caller-owned launch evidence, including interrupted result transfer.
+
+    None is reserved for the process-construction interval where no returned
+    process handle establishes whether a launch occurred.
+    """
+
     executed: bool | None = False
 
 
 def _execute(
-    spec: OracleSpec, root: Path, database: Path, execution: _ExecutionState
+    spec: OracleSpec, root: Path, database: Path, execution: OracleInvocation
 ) -> OracleResult:
     started = time.monotonic()
     argv = tuple(
@@ -295,35 +301,35 @@ def _execute(
     creation_flags = 0
     if sys.platform == "win32":
         creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
-    try:
-        execution.executed = None
-        process = subprocess.Popen(
-            argv,
-            cwd=root,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            bufsize=0,
-            shell=False,
-            start_new_session=os.name == "posix",
-            creationflags=creation_flags,
-        )
-        execution.executed = True
-    except (OSError, ValueError):
-        execution.executed = False
-        return OracleResult(
-            Outcome.UNRESOLVED,
-            "launch_error",
-            None,
-            0,
-            time.monotonic() - started,
-            executed=False,
-        )
-
+    process: subprocess.Popen[bytes] | None = None
     close_job: Callable[[], None] | None = None
     readers: tuple[threading.Thread, ...] = ()
     forced_reason: str | None = None
     try:
+        try:
+            execution.executed = None
+            process = subprocess.Popen(
+                argv,
+                cwd=root,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0,
+                shell=False,
+                start_new_session=os.name == "posix",
+                creationflags=creation_flags,
+            )
+            execution.executed = True
+        except (OSError, ValueError):
+            execution.executed = False
+            return OracleResult(
+                Outcome.UNRESOLVED,
+                "launch_error",
+                None,
+                0,
+                time.monotonic() - started,
+                executed=False,
+            )
         if sys.platform == "win32":
             close_job = _windows_job(process.pid)
         assert process.stdout is not None
@@ -356,10 +362,14 @@ def _execute(
         capture.stop.set()
         # Also reap descendants after a normal exit: they may have closed the
         # pipes but still be running. Do not reuse their test database state.
-        _kill_tree(process, close_job)
-        for pipe in (process.stdout, process.stderr):
-            if pipe is not None:
-                pipe.close()
+        if process is not None:
+            # A returned handle establishes launch even if cancellation preceded
+            # the assignment above. Reap it before transferring that evidence.
+            execution.executed = True
+            _kill_tree(process, close_job)
+            for pipe in (process.stdout, process.stderr):
+                if pipe is not None:
+                    pipe.close()
         for reader in readers:
             if reader.ident is not None:
                 reader.join(timeout=0.1)
@@ -396,10 +406,15 @@ def _execute(
     return OracleResult(outcome, reason, exit_code, output_bytes, time.monotonic() - started)
 
 
-def run_oracle(spec: OracleSpec, database: Path, assets: tuple[Asset, ...]) -> OracleResult:
+def run_oracle(
+    spec: OracleSpec,
+    database: Path,
+    assets: tuple[Asset, ...],
+    invocation: OracleInvocation | None = None,
+) -> OracleResult:
     """Stage pristine files, then execute one bounded oracle invocation."""
     started = time.monotonic()
-    execution = _ExecutionState()
+    execution = invocation if invocation is not None else OracleInvocation()
     # A misbehaving Windows descendant can retain an open file. Cleanup must
     # remain best effort rather than mask the bounded invocation result.
     try:

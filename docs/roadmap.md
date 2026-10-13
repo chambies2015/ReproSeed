@@ -30,14 +30,28 @@ the default JSON shape, execution acknowledgement and confirmation counts. Test 
 pre-M1b version-1 compatibility. See [M1b.1 evidence](m1b1-completion.md).
 
 Hashes and metadata consistency establish neither authorship nor historical execution.
-Inspection does not execute the oracle. Hosted validation of M1b.1 remains pending Dan's
-commit and push unless a run on that implementation is observed.
+Inspection does not execute the oracle. The hosted gate was satisfied by
+[run 38455095031](https://github.com/chambies2015/ReproSeed/actions/runs/38455095031) on reviewed
+commit `e2606aae3d33bd18bda8ba29aef56bd9aff14c29`: Ubuntu/Python 3.12, Ubuntu/Python 3.14 and
+Windows/Python 3.12 passed tests, distribution builds and installed-wheel workflows.
+This accepted M1b.1 run does not validate the later cancellation repair. Historical reports
+retain the observations available when they were written.
+
+## M1b.1.1 — interruption-consistent search progress
+
+Repair interrupted acceptance and cached-attempt publication so the retained selection,
+accepted-reduction chain and summaries describe one committed search state. Audit adjacent
+invocation accounting without weakening the version-1 reader or changing reduction ordering.
+Add deterministic boundary coverage and real SQLite/subprocess interrupted-bundle workflows,
+including inspection and relocated replay. See [cancellation repair evidence](m1b1-1-completion.md)
+for the tested boundaries, platform results and remaining limits. Hosted validation of this
+repair awaits Dan's review, commit and push; the accepted M1b.1 run above is separate evidence.
 
 ## M1b.2 — demanding synthetic fixtures and targeted diagnostics
 
 Add additional demanding synthetic fixtures and focused diagnostics within the existing
 adapter and oracle contracts. Use observed failures to choose the work; do not expand schema
-support, add new algorithms or change delivery surfaces as part of M1b.1.
+support, add new algorithms or change delivery surfaces as part of M1b.1 or M1b.1.1.
 
 ## M2 — broader SQLite support
 

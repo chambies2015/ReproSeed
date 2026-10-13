@@ -14,7 +14,7 @@ import pytest
 
 from reproseed.artifacts import BundleError, create_bundle, sha256, validate_bundle
 from reproseed.config import Config, OracleSpec, load_config
-from reproseed.oracle import OracleInterrupted, OracleResult, Outcome
+from reproseed.oracle import OracleInterrupted, OracleInvocation, OracleResult, Outcome
 from reproseed.report import ReportError, validate_report
 from reproseed.workflow import build_verified_fixture
 
@@ -309,7 +309,9 @@ def test_empty_and_irreducible_genuine_writer_reports_remain_valid(
         20,
     )
 
-    def invoke(spec: OracleSpec, path: Path, assets: object) -> OracleResult:
+    def invoke(
+        spec: OracleSpec, path: Path, assets: object, invocation: OracleInvocation | None = None
+    ) -> OracleResult:
         with closing(sqlite3.connect(path)) as database:
             empty = database.execute(f"SELECT count(*) FROM {quoted}").fetchone()[0] == 0
         if empty and retain_one:

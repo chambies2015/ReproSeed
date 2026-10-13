@@ -1,6 +1,6 @@
 # Engineering guidance
 
-ReproSeed M1b.1 is a local Python 3.12+ CLI with a standard-library-only runtime.
+ReproSeed M1b.1.1 is a local Python 3.12+ CLI with a standard-library-only runtime.
 Architecture and scope are described in docs/architecture.md and docs/roadmap.md.
 
 ## Module boundaries
@@ -9,7 +9,8 @@ Architecture and scope are described in docs/architecture.md and docs/roadmap.md
 - sqlite_adapter.py owns read-only snapshots, schema inspection, dependency closures,
   private candidate construction, validation and compact export.
 - oracle.py stages disposable copies and classifies bounded subprocess executions.
-- reducer.py owns deterministic row removal and normalized candidate caching.
+- reducer.py owns deterministic row removal, normalized candidate caching and coherent
+  committed search progress.
 - workflow.py owns confirmation counts, budgets and verification sequencing.
 - artifacts.py owns private bundle acquisition, portable replay configuration and hash verification.
 - report.py owns typed version-1 evidence checks.
@@ -32,6 +33,14 @@ Use synthetic fixtures and real SQLite/subprocess integration tests. Preserve us
 - Never accept an exit code without the configured exact marker on the configured stream.
 - Baseline/final verification needs three fresh confirmations; accepted reductions need two.
 - Reserve final verification capacity. Do not publish a verified bundle on failed confirmation.
+- Publish retained rows, acceptance evidence and attempt history as one coherent search state.
+- Derive cache/invalid/unresolved summaries from committed attempt records.
+- Search cancellation preserves a committed confirmed selection; it never promotes partial
+  confirmations or rolls back actual oracle executions.
+- A handled search interruption stops search and attempts compact-fixture final verification.
+  Baseline/finalization interruption or a further interruption may abort without a bundle.
+- A second interruption during invocation accounting recovery must bypass search salvage and
+  abort rather than publish incomplete execution accounting.
 - Quote identifiers, bind values, disable FK actions only on private candidates and validate.
 - Bundle assets are explicit regular files, never recursive collection or implicit secrets.
 - Inspect/replay validate copied payload bytes against the captured manifest before execution.
@@ -67,4 +76,7 @@ The explicit compatibility recipe archives the reviewed pre-M1b commit and uses 
 to generate a genuine version-1 synthetic bundle before the current reader inspects/replays it.
 Its scratch directory must be new; generated archives, databases and bundles stay ignored.
 Exercise default/explicit JSON and text inspection in installed-wheel validation.
+Use deterministic interruption injection at state transitions, plus real SQLite/subprocess
+bundle inspection and relocated replay. Keep real-signal coverage distinct from injected
+KeyboardInterrupt coverage and record the platform on which each actually ran.
 See CONTRIBUTING.md for the complete validation workflow and platform limits.

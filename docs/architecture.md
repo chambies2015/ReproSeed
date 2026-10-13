@@ -1,4 +1,4 @@
-# M1b.1 architecture
+# M1b.1.1 architecture
 
 The contract is: smaller fixture, same specified failure, independently replayable evidence.
 "Same" is the configured exit/marker contract. ReproSeed does not infer semantic equivalence
@@ -81,6 +81,18 @@ Each search trial reserves room for two possible confirmations before beginning.
 single remaining search slot can remain unused. Empty fixtures and irreducible fixtures
 are valid results if final verification succeeds. Budget exhaustion or search interruption
 preserves the best confirmed subset, then attempts final verification.
+
+The reducer publishes progress through one frozen checkpoint containing the retained rows
+and the committed lengths of append-only attempt and acceptance logs. A progress transition
+appends complete records provisionally, then replaces the checkpoint reference. A handled
+KeyboardInterrupt returns only the prefixes named by that checkpoint;
+provisional tails do not become report history. Before publication the previous confirmed
+selection survives, and after publication the newer selection and its acceptance evidence
+survive together. Cache hits are derived from the returned committed attempts, as are the
+workflow's invalid/unresolved summaries. Each transition appends small records and replaces
+one checkpoint; it does not copy the accumulated history on every attempt. Evaluation and
+oracle effects remain separate from this publication, and actual executions are not undone
+when a pending search record is abandoned. Search ordering and normalized caching are unchanged.
 
 Reports include original/final table counts, actual executions, attempt classifications,
 confirmation records, accepted size changes, cache hits and a precise termination reason.
@@ -165,10 +177,49 @@ or replay was PASS/UNRESOLVED; 2 means usage/configuration/schema/filesystem/bun
 130 means interrupted before completing verification. An interrupted search can still
 return 0 if its preserved fixture passes final verification; report.json records interruption.
 
+## Cancellation boundaries
+
+One handled search interruption stops further search and recovers the checkpoint's coherent
+confirmed selection. The workflow materializes that selection from pristine snapshot state,
+compacts it and confirms three fresh copies of the exact exported fixture. No cached or partial
+confirmation supplies final evidence. A bundle accepted by the strict reader is published only
+after all three final outcomes establish TARGET_FAILURE. Before a verified baseline, during
+compaction/finalization or during final verification, interruption may abort with no verified
+bundle. A second interruption during counter recovery propagates through the reducer's
+search handler and aborts with CLI exit 130; an uncharged invocation cannot be salvaged into
+a verified bundle. A further interruption during graceful finalization also propagates and
+may abort. If another interruption arrives while the reducer prepares its unresolved
+attempt record, the outer search handler can discard that provisional record and return the
+same coherent checkpoint. Neither path retries indefinitely. Pre-existing output is preserved
+and tool-owned partial output is removed where possible.
+
 Cancellation during staging does not count as an execution. Cancellation after a confirmed
 launch counts once. If cancellation interrupts Popen construction itself, launch is unknown;
 the report separates unknown_interrupted_launches from actual oracle_invocations and charges
 each unknown launch conservatively against the budget. Interruption records are unresolved.
+The oracle updates an optional caller-owned invocation state with known nonlaunch, unknown
+construction or confirmed execution before returning; existing three-argument callers still
+work. A returned process handle establishes execution and enters bounded cleanup even if an
+interruption precedes the normal executed-state assignment. The counter uses the shared state
+if interruption occurs after oracle completion but before its return value is transferred.
+It publishes count, unknown-launch charge and interruption evidence together through one
+immutable accounting reference, including the invocation identity to prevent charging the
+same execution twice.
+Normal accounting transitions replace a small state object; interruption evidence uses a
+linked history materialized only when requested, avoiding repeated history copies. The search
+checkpoint cannot roll back this accounting. Version 1 still has the bounded
+omitted-confirmation limitations described above; no full execution ledger is invented.
+
+Regression coverage injects one-shot exceptions at publication and accounting boundaries,
+including the first and second candidate confirmations. Real SQLite/subprocess workflow tests
+exercise acceptance and cache-hit interruption through finalization, default JSON/text
+inspection and relocated three-confirmation replay, with source and bundle immutability
+checks. A bounded POSIX signal subprocess smoke is separate from deterministic injection;
+the [M1b.1.1 completion report](m1b1-1-completion.md) records actual platforms, versions and skips.
+[Python's signal exception note](https://docs.python.org/3.12/library/signal.html#note-on-signal-handlers-and-exceptions)
+explains that KeyboardInterrupt can arrive between operations. These tested boundaries do
+not establish immunity to every asynchronous exception, forced termination, power loss or
+hostile process interference. Bounded process cleanup retains the platform caveats in SECURITY.md.
 
 ## Primary references
 
@@ -177,6 +228,7 @@ each unknown launch conservatively against the budget. Interruption records are 
 - [SQLite PRAGMAs](https://www.sqlite.org/pragma.html)
 - [Python 3.12 sqlite3](https://docs.python.org/3.12/library/sqlite3.html)
 - [Python 3.12 subprocess](https://docs.python.org/3.12/library/subprocess.html)
+- [Python 3.12 signal exceptions](https://docs.python.org/3.12/library/signal.html#note-on-signal-handlers-and-exceptions)
 - [Python 3.12 JSON](https://docs.python.org/3.12/library/json.html)
 - [Windows Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
 - [Windows PeekNamedPipe](https://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-peeknamedpipe)
