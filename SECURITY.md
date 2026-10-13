@@ -26,13 +26,27 @@ credentials are never serialized by ReproSeed.
 
 On POSIX, processes start in a fresh session; cleanup kills their process group. A process
 that deliberately detaches can escape this group. On Windows, the runner attempts assignment
-to a kill-on-close Job Object and polls pipes with PeekNamedPipe. Closing the job terminates
-assigned descendants. Assignment occurs after process creation, so there is a startup race;
+to a kill-on-close Job Object and polls pipes with PeekNamedPipe. Cleanup captures member
+process handles before requesting Job termination, captures new members afterward, and waits
+for process signals before releasing those handles and closing the owned Job. Waiting only
+for the launcher does not establish descendant completion. Assignment occurs after process
+creation, so there is a startup race;
 host job policies may reject assignment. Bounded taskkill /T /F plus direct process kill
 provide best-effort fallback. Descendants that detach or outlive an unassigned parent can
 escape. Cleanup and temporary-directory removal cannot guarantee removal of files held by
 escaped processes. The runner returns within finite process/cleanup bounds rather than
-waiting indefinitely for pipe EOF. Platform execution evidence belongs in the milestone
+waiting indefinitely for pipe EOF.
+
+Tree waits, reader shutdown and actual transient Windows deletion retries share one
+monotonic 1.5-second cleanup allowance. Successful cleanup has no unconditional delay.
+Removal uses only the invocation's exact disposable root and does not traverse symlinks
+or junction targets. A persistent lock, denied API operation or exhausted allowance emits
+a cleanup warning; it does not replace cancellation or redefine the oracle outcome.
+Synchronous OS calls themselves cannot be preempted by this allowance. A further interruption
+during cleanup aborts salvage after recording known launch evidence once. See the
+[M1b.1.2 completion report](docs/m1b1-2-completion.md) for exercised boundaries and limits.
+
+Platform execution evidence belongs in the milestone
 completion reports. The accepted M1a.1 hosted run covers Ubuntu/Python 3.12 and 3.14 and
 Windows/Python 3.12 at its reviewed commit; it does not validate later working changes.
 

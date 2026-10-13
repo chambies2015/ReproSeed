@@ -44,14 +44,26 @@ accepted-reduction chain and summaries describe one committed search state. Audi
 invocation accounting without weakening the version-1 reader or changing reduction ordering.
 Add deterministic boundary coverage and real SQLite/subprocess interrupted-bundle workflows,
 including inspection and relocated replay. See [cancellation repair evidence](m1b1-1-completion.md)
-for the tested boundaries, platform results and remaining limits. Hosted validation of this
-repair awaits Dan's review, commit and push; the accepted M1b.1 run above is separate evidence.
+for the tested boundaries, platform results and remaining limits. Hosted
+[run 38460548154](https://github.com/chambies2015/ReproSeed/actions/runs/38460548154) on reviewed
+commit `b2bcc51f691d7c5dfe30345199f884dd7e7bb97e` passed both Ubuntu jobs (Python 3.12/3.14),
+but Windows/Python 3.12 failed cancellation directory cleanup in job `115514293016`;
+its later build and installed-wheel steps were skipped. This was not a successful hosted gate.
+
+## M1b.1.2 — hosted Windows cancellation cleanup repair
+
+Observe owned process completion before removing disposable oracle state, with one bounded
+cleanup allowance, explicit resource ownership and persistent-obstruction warnings. Strengthen
+readiness and separate process-termination/directory-removal evidence; retain deterministic
+accounting/cleanup tests and finite Windows stability probes. See
+[M1b.1.2 completion evidence](m1b1-2-completion.md). Hosted validation of the uncommitted repair
+remains pending Dan's review, commit and push; local success and earlier runs do not establish it.
 
 ## M1b.2 — demanding synthetic fixtures and targeted diagnostics
 
 Add additional demanding synthetic fixtures and focused diagnostics within the existing
 adapter and oracle contracts. Use observed failures to choose the work; do not expand schema
-support, add new algorithms or change delivery surfaces as part of M1b.1 or M1b.1.1.
+support, add new algorithms or change delivery surfaces as part of M1b.1, M1b.1.1 or M1b.1.2.
 
 ## M2 — broader SQLite support
 

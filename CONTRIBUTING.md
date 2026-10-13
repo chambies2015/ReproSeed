@@ -42,8 +42,24 @@ real SQLite and subprocesses through final verification, both inspection formats
 relocated replay. A bounded POSIX signal smoke complements this coverage where supported;
 an injected exception on Windows does not establish Windows console-signal behavior.
 
+Windows process-tree regressions use parent/child readiness handshakes and retain process
+handles to observe termination separately from disposable-directory deletion. Test teardown
+records observations before assertions and recovers only its own synthetic processes and
+files. Keep finite stability probes as recorded validation batches, never hosted retries.
+Cleanup waits/retries share a 1.5-second allowance; tests must preserve the total bound.
+The descendant-pipe and live-tree timeout harnesses trigger a test-only monotonic deadline
+jump after both processes are ready (and after parent exit for the open-pipe case). The
+clock offset then stays fixed so cleanup consumes its real shared allowance. Actual
+1.8-second/four-second total assertions remain; the separate 0.15-second timeout test uses
+real elapsed time. Linux retains immediate evidence before a read-only process-identity
+observation of at most 0.2 seconds, included in those total bounds. Windows completion
+assertions remain immediate. Deterministic tests cover disappearing Job members,
+failed assignment, remaining budget, deletion obstruction and further interruption. The
+[M1b.1.2 report](docs/m1b1-2-completion.md) separates natural failures, injected boundaries,
+Windows API denials and actual platform execution.
+
 Keep source acquisition, candidate state and oracle state separate. Preserve values and
 schema. Add meaningful regression cases for contracts changed by a patch. Do not weaken
 acceptance assertions or silently skip failures. Read AGENTS.md before implementation and
 SECURITY.md before executing external oracle code. Publishing and later roadmap milestones
-are outside M1b.1.1.
+are outside M1b.1.2.

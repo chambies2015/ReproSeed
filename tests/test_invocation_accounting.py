@@ -114,6 +114,53 @@ def test_interrupted_record_and_charge_publish_together(
     assert counter.charged == (executed is not False)
 
 
+def test_further_oracle_cleanup_interrupt_aborts_after_one_known_charge(
+    config: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def interrupt(*args: object) -> OracleResult:
+        raise OracleInterrupted(True, abort=True)
+
+    monkeypatch.setattr("reproseed.workflow.run_oracle", interrupt)
+    counter = InvocationCounter(config)
+    with pytest.raises(AbortReduction):
+        counter.invoke(config.source)
+    assert counter.count == counter.charged == 1
+    assert counter.unknown_launches == 0
+    assert counter.interrupted_invocations == [
+        {"outcome": "UNRESOLVED", "reason": "interrupted", "executed": True}
+    ]
+
+
+def test_second_interrupt_in_real_oracle_cleanup_aborts_and_preserves_launch(
+    config: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from reproseed import oracle
+
+    with closing(sqlite3.connect(config.source)) as database:
+        database.execute("CREATE TABLE records (id INTEGER PRIMARY KEY)")
+    config = replace(config, oracle=replace(config.oracle, argv=("{python}", "-c", "pass")))
+    original = oracle._kill_tree
+    calls = 0
+
+    def interrupt_cleanup(*args: object) -> None:
+        nonlocal calls
+        calls += 1
+        original(*args)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(oracle, "_kill_tree", interrupt_cleanup)
+    counter = InvocationCounter(config)
+    with interrupt_before_statement(oracle._execute, "execution.executed = True"):
+        with pytest.raises(AbortReduction):
+            counter.invoke(config.source)
+    assert calls == 1
+    assert counter.count == counter.charged == 1
+    assert counter.unknown_launches == 0
+    assert counter.interrupted_invocations == [
+        {"outcome": "UNRESOLVED", "reason": "interrupted", "executed": True}
+    ]
+
+
 @pytest.mark.parametrize("executed", [False, True, None])
 @pytest.mark.parametrize("publish_first", [False, True])
 def test_further_cancellation_during_interrupted_accounting_aborts_with_coherent_snapshot(

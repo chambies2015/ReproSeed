@@ -92,6 +92,8 @@ class InvocationCounter:
                 self._record(invocation, interrupted=True)
             except KeyboardInterrupt:
                 raise AbortReduction from None
+            if isinstance(exc, OracleInterrupted) and exc.abort:
+                raise AbortReduction from exc
             raise
 
 

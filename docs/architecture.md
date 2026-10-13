@@ -1,4 +1,4 @@
-# M1b.1.1 architecture
+# M1b.1.2 architecture
 
 The contract is: smaller fixture, same specified failure, independently replayable evidence.
 "Same" is the configured exit/marker contract. ReproSeed does not infer semantic equivalence
@@ -68,6 +68,20 @@ newline. Substrings or surrounding extra characters do not match. Output on the 
 stream does not satisfy the contract. Combined output byte limits cover both streams. No raw
 output/row values are stored. No majority vote occurs. --allow-exec acknowledges execution;
 it is not a sandbox. See SECURITY.md for platform cleanup and data-sharing boundaries.
+
+Oracle cleanup uses one monotonic 1.5-second allowance for tree completion waits,
+reader shutdown and retries of actual transient Windows directory-deletion failures.
+For an assigned Windows Job, it captures member process handles before requesting
+termination, captures newly associated members afterward and waits for process signals.
+Exiting members can disappear from the Job list before their process objects signal;
+waiting only for the launcher is insufficient. Membership checks use only this invocation's
+Job, and every acquired observation handle and the Job handle is released once. Neither
+Job-handle signaling nor an ActiveProcesses count supplies the process completion condition.
+Readers stop and join,
+pipes close, and only the exact disposable directory is removed. Successful cleanup does
+not sleep; exceptional obstruction warns without changing the failure contract. The
+allowance bounds waits/retries, not an externally stalled synchronous OS call. See
+[M1b.1.2 evidence](m1b1-2-completion.md) for natural failures and deterministic boundaries.
 
 ## Search, budgets and uncertainty
 
@@ -205,6 +219,10 @@ if interruption occurs after oracle completion but before its return value is tr
 It publishes count, unknown-launch charge and interruption evidence together through one
 immutable accounting reference, including the invocation identity to prevent charging the
 same execution twice.
+
+A further interruption during oracle cleanup carries an abort flag alongside the existing
+launch evidence. The counter records that invocation once, then raises AbortReduction to
+bypass search salvage. This flag is internal and adds no version-1 report field.
 Normal accounting transitions replace a small state object; interruption evidence uses a
 linked history materialized only when requested, avoiding repeated history copies. The search
 checkpoint cannot roll back this accounting. Version 1 still has the bounded

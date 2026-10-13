@@ -10,18 +10,27 @@ from __future__ import annotations
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, Protocol
 
 from reproseed.config import Asset, OracleSpec
+
+
+class _Job(Protocol):
+    def stop(self, deadline: float) -> None: ...
+
+    def close(self) -> None: ...
+
 
 if sys.platform == "win32":
     import ctypes
@@ -44,6 +53,24 @@ if sys.platform == "win32":
     _kernel.AssignProcessToJobObject.restype = wintypes.BOOL
     _kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     _kernel.CloseHandle.restype = wintypes.BOOL
+    _kernel.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    _kernel.TerminateJobObject.restype = wintypes.BOOL
+    _kernel.QueryInformationJobObject.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+    ]
+    _kernel.QueryInformationJobObject.restype = wintypes.BOOL
+    _kernel.IsProcessInJob.argtypes = [
+        wintypes.HANDLE,
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.BOOL),
+    ]
+    _kernel.IsProcessInJob.restype = wintypes.BOOL
+    _kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    _kernel.WaitForSingleObject.restype = wintypes.DWORD
     _kernel.PeekNamedPipe.argtypes = [
         wintypes.HANDLE,
         ctypes.c_void_p,
@@ -87,33 +114,133 @@ if sys.platform == "win32":
             ("peak_job_memory", ctypes.c_size_t),
         ]
 
-    def _windows_job(pid: int) -> Callable[[], None] | None:
+    class _WindowsJob:
+        """Own exactly one invocation's Job; process signals establish exit.
+
+        ActiveProcesses has process-reference lifetime semantics. Neither
+        that count nor a Job handle wait establishes process termination.
+        """
+
+        def __init__(self, handle: int) -> None:
+            self.handle: int | None = handle
+
+        def close(self) -> None:
+            handle, self.handle = self.handle, None
+            if handle is not None:
+                _kernel.CloseHandle(handle)
+
+        def stop(self, deadline: float) -> None:
+            assert self.handle is not None
+            owned: list[int] = []
+            members: list[int] = []
+            seen: set[int] = set()
+
+            def capture_members() -> None:
+                for pid in self._pids(deadline):
+                    if pid in seen:
+                        continue
+                    if time.monotonic() >= deadline:
+                        _cleanup_warning("Job member capture deadline", None)
+                        return
+                    process_handle = _kernel.OpenProcess(0x100000 | 0x1000, False, pid)
+                    if not process_handle:
+                        error = ctypes.get_last_error()
+                        if error != 87:  # ERROR_INVALID_PARAMETER: already gone
+                            _cleanup_warning("Job member observation", error)
+                        continue
+                    owned.append(process_handle)
+                    seen.add(pid)  # the retained handle now prevents PID reuse
+                    member = wintypes.BOOL()
+                    if not _kernel.IsProcessInJob(
+                        process_handle, self.handle, ctypes.byref(member)
+                    ):
+                        _cleanup_warning("Job membership observation", ctypes.get_last_error())
+                    elif member.value:
+                        # PID reuse cannot make us wait on an unrelated process.
+                        members.append(process_handle)
+
+            try:
+                # Capture identities BEFORE termination: exiting members can
+                # disappear from the Job list before their objects signal.
+                capture_members()
+                if not _kernel.TerminateJobObject(self.handle, 1):
+                    _cleanup_warning("Job termination", ctypes.get_last_error())
+                    return  # close() still supplies kill-on-close fallback
+                # Also cover members associated during the first snapshot.
+                capture_members()
+                for process_handle in members:
+                    milliseconds = int(max(0.0, deadline - time.monotonic()) * 1000)
+                    status = _kernel.WaitForSingleObject(process_handle, milliseconds)
+                    if status != 0:  # WAIT_OBJECT_0 means the process exited
+                        _cleanup_warning(
+                            "Job member wait",
+                            ctypes.get_last_error() if status == 0xFFFFFFFF else status,
+                        )
+            finally:
+                for process_handle in owned:
+                    _kernel.CloseHandle(process_handle)
+
+        def _pids(self, deadline: float) -> tuple[int, ...]:
+            capacity = 64
+            while time.monotonic() < deadline:
+                # ULONG_PTR list follows two DWORD counts (8-byte header).
+                buffer = ctypes.create_string_buffer(8 + capacity * ctypes.sizeof(ctypes.c_size_t))
+                if _kernel.QueryInformationJobObject(
+                    self.handle, 3, buffer, ctypes.sizeof(buffer), None
+                ):
+                    assigned = wintypes.DWORD.from_buffer(buffer).value
+                    count = wintypes.DWORD.from_buffer(buffer, 4).value
+                    if count < assigned:
+                        if capacity >= 65536:
+                            _cleanup_warning("Job member enumeration capacity", None)
+                            return ()
+                        capacity *= 2
+                        continue
+                    pids = (ctypes.c_size_t * count).from_buffer(buffer, 8)
+                    return tuple(pids)
+                error = ctypes.get_last_error()
+                if error != 234 or capacity >= 65536:  # ERROR_MORE_DATA
+                    _cleanup_warning("Job member enumeration", error)
+                    return ()
+                capacity *= 2
+            _cleanup_warning("Job member enumeration deadline", None)
+            return ()
+
+    def _windows_job(pid: int, owner: _Cleanup | None = None) -> _WindowsJob | None:
         """Try to keep the process tree in a kill-on-close Windows Job."""
         handle = _kernel.CreateJobObjectW(None, None)
         if not handle:
             return None
-        limits = _ExtendedLimits()
-        limits.basic.flags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-        configured = _kernel.SetInformationJobObject(
-            handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)
-        )
-        process_handle = _kernel.OpenProcess(0x0100 | 0x0001, False, pid)
+        job = _WindowsJob(handle)
+        if owner is not None:
+            owner.job = job
         assigned = False
-        if process_handle:
-            try:
-                assigned = bool(
-                    configured and _kernel.AssignProcessToJobObject(handle, process_handle)
-                )
-            finally:
-                _kernel.CloseHandle(process_handle)
-        if not assigned:
-            _kernel.CloseHandle(handle)
+        try:
+            limits = _ExtendedLimits()
+            limits.basic.flags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            configured = _kernel.SetInformationJobObject(
+                handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)
+            )
+            if configured:
+                process_handle = _kernel.OpenProcess(0x0100 | 0x0001, False, pid)
+                if process_handle:
+                    try:
+                        assigned = bool(_kernel.AssignProcessToJobObject(handle, process_handle))
+                    finally:
+                        _kernel.CloseHandle(process_handle)
+            if assigned:
+                return job
             return None
-
-        def close() -> None:
-            _kernel.CloseHandle(handle)
-
-        return close
+        except BaseException:
+            job.close()
+            if owner is not None:
+                owner.job = None
+            raise
+        finally:
+            if not assigned:
+                job.close()
+                if owner is not None:
+                    owner.job = None
 
 
 def _read_pipe(pipe: BinaryIO) -> bytes | None:
@@ -144,9 +271,10 @@ class OracleInterrupted(KeyboardInterrupt):
     oracle actually launched cannot be established from the returned state.
     """
 
-    def __init__(self, executed: bool | None) -> None:
+    def __init__(self, executed: bool | None, *, abort: bool = False) -> None:
         super().__init__("oracle invocation interrupted")
         self.executed = executed
+        self.abort = abort
 
 
 @dataclass(frozen=True)
@@ -239,27 +367,112 @@ class _Capture:
             self.done[stream].set()
 
 
-def _kill_tree(process: subprocess.Popen[bytes], close_job: Callable[[], None] | None) -> None:
+_CLEANUP_SECONDS = 1.5
+
+
+@dataclass
+class _Cleanup:
+    deadline: float | None = None
+    abort: bool = False
+    job: _Job | None = None
+
+    def begin(self) -> float:
+        if self.deadline is None:
+            self.deadline = time.monotonic() + _CLEANUP_SECONDS
+        return self.deadline
+
+    def remaining(self) -> float:
+        return max(0.0, self.begin() - time.monotonic())
+
+
+def _cleanup_warning(operation: str, error: int | None) -> None:
+    # No raw oracle output, staged values or inherited environment. Warnings
+    # configured as errors must not replace cancellation or its launch evidence.
+    try:
+        warnings.warn(
+            f"oracle cleanup incomplete: {operation} (code {error})", RuntimeWarning, stacklevel=2
+        )
+    except RuntimeWarning:
+        pass
+
+
+def _remove_owned_directory(root: Path, cleanup: _Cleanup) -> None:
+    def reset_readonly(function: Callable[[str], object], path: str, error: BaseException) -> None:
+        target = Path(path)
+        if isinstance(error, FileNotFoundError):
+            return
+        if sys.platform == "win32" and isinstance(error, PermissionError):
+            try:
+                metadata = target.lstat()
+            except FileNotFoundError:
+                return
+            if (
+                function in {os.unlink, os.rmdir}
+                and not metadata.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT
+                and not metadata.st_mode & stat.S_IWRITE
+            ):
+                target.chmod(metadata.st_mode | stat.S_IWRITE)
+                try:
+                    function(path)
+                except FileNotFoundError:
+                    pass
+                return
+        raise error
+
+    cleanup.begin()
+    while True:
+        try:
+            # rmtree does not traverse nested symlinks or Windows junctions.
+            # Refuse a replaced root as well; never resolve it to another tree.
+            if root.is_symlink() or root.is_junction():
+                _cleanup_warning("temporary directory replaced by a link", None)
+                return
+            shutil.rmtree(root, onexc=reset_readonly)
+            return
+        except FileNotFoundError:
+            if root.exists():
+                _cleanup_warning("temporary directory removal left its root", 2)
+            return
+        except OSError as error:
+            # Windows access/sharing/lock/nonempty errors can be transient
+            # after termination. Other failures do not warrant a retry.
+            transient = getattr(error, "winerror", None) in {5, 32, 33, 145}
+            remaining = cleanup.remaining()
+            if not transient or remaining <= 0:
+                _cleanup_warning(
+                    "temporary directory removal", getattr(error, "winerror", error.errno)
+                )
+                return
+            time.sleep(min(0.01, remaining))
+
+
+def _kill_tree(process: subprocess.Popen[bytes], job: _Job | None, cleanup: _Cleanup) -> None:
     """Bounded cleanup, including a POSIX group whose leader already exited.
 
-    Windows uses a kill-on-close Job when assignment succeeds, and taskkill
+    Windows terminates and observes an owned Job when assignment succeeds, and taskkill
     otherwise. Assignment races, host Job restrictions and detached processes
     mean cleanup is still best effort, not an isolation guarantee.
     """
+    deadline = cleanup.begin()
     if sys.platform == "win32":
-        if close_job is not None:
-            close_job()
+        if job is not None:
+            try:
+                job.stop(deadline)
+            finally:
+                job.close()
         elif process.poll() is None:
             try:
-                subprocess.run(
+                result = subprocess.run(
                     ["taskkill", "/PID", str(process.pid), "/T", "/F"],
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     shell=False,
-                    timeout=1.0,
+                    timeout=cleanup.remaining(),
                     check=False,
                 )
+                if result.returncode:
+                    _cleanup_warning("taskkill exit", result.returncode)
             except (OSError, subprocess.TimeoutExpired):
                 pass
     else:
@@ -273,9 +486,9 @@ def _kill_tree(process: subprocess.Popen[bytes], close_job: Callable[[], None] |
         except OSError:
             pass
     try:
-        process.wait(timeout=0.5)
+        process.wait(timeout=cleanup.remaining())
     except subprocess.TimeoutExpired:
-        pass
+        _cleanup_warning("parent wait deadline", None)
 
 
 @dataclass
@@ -290,7 +503,7 @@ class OracleInvocation:
 
 
 def _execute(
-    spec: OracleSpec, root: Path, database: Path, execution: OracleInvocation
+    spec: OracleSpec, root: Path, database: Path, execution: OracleInvocation, cleanup: _Cleanup
 ) -> OracleResult:
     started = time.monotonic()
     argv = tuple(
@@ -302,9 +515,9 @@ def _execute(
     if sys.platform == "win32":
         creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
     process: subprocess.Popen[bytes] | None = None
-    close_job: Callable[[], None] | None = None
     readers: tuple[threading.Thread, ...] = ()
     forced_reason: str | None = None
+    interrupted = False
     try:
         try:
             execution.executed = None
@@ -331,7 +544,7 @@ def _execute(
                 executed=False,
             )
         if sys.platform == "win32":
-            close_job = _windows_job(process.pid)
+            _windows_job(process.pid, cleanup)
         assert process.stdout is not None
         assert process.stderr is not None
         readers = tuple(
@@ -358,21 +571,38 @@ def _execute(
                 forced_reason = "deadline exceeded (process or open output pipes)"
                 break
             capture.stop.wait(min(0.01, remaining))
+    except KeyboardInterrupt:
+        interrupted = True
+        raise
     finally:
         capture.stop.set()
         # Also reap descendants after a normal exit: they may have closed the
         # pipes but still be running. Do not reuse their test database state.
-        if process is not None:
-            # A returned handle establishes launch even if cancellation preceded
-            # the assignment above. Reap it before transferring that evidence.
-            execution.executed = True
-            _kill_tree(process, close_job)
-            for pipe in (process.stdout, process.stderr):
-                if pipe is not None:
-                    pipe.close()
-        for reader in readers:
-            if reader.ident is not None:
-                reader.join(timeout=0.1)
+        try:
+            try:
+                if process is not None:
+                    # A returned handle establishes launch even if cancellation
+                    # preceded the assignment above.
+                    execution.executed = True
+                    _kill_tree(process, cleanup.job, cleanup)
+            finally:
+                try:
+                    for reader in readers:
+                        if reader.ident is not None:
+                            reader.join(timeout=cleanup.remaining())
+                            if reader.is_alive():
+                                _cleanup_warning("pipe reader deadline", None)
+                finally:
+                    if process is not None:
+                        for pipe in (process.stdout, process.stderr):
+                            if pipe is not None:
+                                try:
+                                    pipe.close()
+                                except OSError as error:
+                                    _cleanup_warning("pipe close", error.errno)
+        except KeyboardInterrupt:
+            cleanup.abort = cleanup.abort or interrupted
+            raise
 
     exit_code = process.poll()
     with capture.lock:
@@ -415,13 +645,12 @@ def run_oracle(
     """Stage pristine files, then execute one bounded oracle invocation."""
     started = time.monotonic()
     execution = invocation if invocation is not None else OracleInvocation()
-    # A misbehaving Windows descendant can retain an open file. Cleanup must
-    # remain best effort rather than mask the bounded invocation result.
+    cleanup = _Cleanup()
+    root: Path | None = None
+    interrupted = False
     try:
-        with tempfile.TemporaryDirectory(
-            prefix="reproseed-oracle-", ignore_cleanup_errors=True
-        ) as temp:
-            root = Path(temp)
+        try:
+            root = Path(tempfile.mkdtemp(prefix="reproseed-oracle-"))
             staged_database = root / "db.sqlite3"
             try:
                 shutil.copyfile(database, staged_database)
@@ -438,6 +667,16 @@ def run_oracle(
                     time.monotonic() - started,
                     executed=False,
                 )
-            return _execute(spec, root, staged_database, execution)
+            return _execute(spec, root, staged_database, execution, cleanup)
+        except KeyboardInterrupt:
+            interrupted = True
+            raise
+        finally:
+            try:
+                if root is not None:
+                    _remove_owned_directory(root, cleanup)
+            except KeyboardInterrupt:
+                cleanup.abort = cleanup.abort or interrupted
+                raise
     except KeyboardInterrupt as error:
-        raise OracleInterrupted(execution.executed) from error
+        raise OracleInterrupted(execution.executed, abort=cleanup.abort) from error
