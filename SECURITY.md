@@ -1,10 +1,19 @@
 # Trust boundaries
 
-ReproSeed runs the exact command selected in configuration. reduce and replay require
+ReproSeed runs the exact command selected in configuration. reduce, replay and executable diagnose require
 --allow-exec because that command executes with your OS permissions and inherited
 environment. shell=False prevents shell interpretation; it does not make code safe.
 Inspect assets and argv before running an unfamiliar bundle. Temporary working directories
 and disposable database copies are state hygiene, not operating-system isolation.
+
+`diagnose` without `--allow-exec` never launches configured code. It validates a private
+source snapshot with the same restricted schema and integrity/FK checks as reduction.
+Static success does not establish reproduction. Executable diagnosis requires three fresh
+target confirmations, preserves actual failed classifications and interrupted-launch
+uncertainty, and creates no replay bundle. Assets are frozen privately before confirmations
+and copied afresh with the database for each attempt. Diagnostic JSON/text omit absolute
+paths, argv and marker values, rows, raw process output and inherited environment values.
+Table names and fixed diagnostic causes remain visible; text escapes terminal controls.
 
 ReproSeed itself opens the source read-only, snapshots with the SQLite backup API and
 issues no source writes, checkpoint, VACUUM or journal-mode changes. A read-only WAL

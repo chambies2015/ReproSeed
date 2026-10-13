@@ -2,7 +2,7 @@
 
 Smaller fixture. Same specified failure. Independently replayable evidence.
 
-ReproSeed is an M1b.1.1 prototype of a local Python CLI. It reduces a disposable SQLite
+ReproSeed is an M1b.2 prototype of a local Python CLI. It reduces a disposable SQLite
 fixture to a relationally valid row subset while reconfirming the explicit exit/marker
 contract supplied by the user. It exports a compact fixture, replay assets and evidence.
 It does not infer semantic crash equivalence. Reduction is not anonymization, and the
@@ -15,6 +15,8 @@ With [uv](https://docs.astral.sh/uv/) installed, run from this checkout:
 ```
 uv sync --locked --python 3.12
 uv run python examples/duplicate_export/generate.py
+uv run reproseed diagnose --config examples/duplicate_export/reproseed.toml
+uv run reproseed diagnose --config examples/duplicate_export/reproseed.toml --allow-exec
 uv run reproseed reduce --config examples/duplicate_export/reproseed.toml --out ./repro-bundle --allow-exec
 uv run reproseed inspect ./repro-bundle
 uv run reproseed inspect ./repro-bundle --format text
@@ -25,12 +27,47 @@ The deterministic example has 2,430 user rows. A deliberately buggy exporter key
 by name globally, losing one of two same-name entries in different projects. The separate
 oracle exercises the exporter and verifies that particular omission before emitting its
 marker. The intended essential case has one owner, two projects and two entries. An
-independent numeric-threshold example lives in examples/threshold/.
+independent numeric-threshold example lives in examples/threshold/. More demanding examples
+exercise [inventory reservations](examples/reservation_overbook/README.md) and
+[cyclic approvals](examples/approval_cycle/README.md).
 
 Choose a new output directory for every reduction. Copy/move the completed bundle elsewhere
 and replay using the installed CLI; original fixture and example files are unnecessary.
 Only Python and ReproSeed are needed for these demos. Arbitrary applications may require
 external executables/dependencies, which ReproSeed does not package automatically.
+
+For your own application, prepare a disposable SQLite fixture and write an oracle that
+exercises the actual defect, emitting one exact marker and the configured exit only for
+that specific failure. List its supporting files explicitly in version-1 configuration.
+Run static diagnosis, then acknowledge execution to confirm the baseline. Reduce into a
+new directory and inspect the result. Review retained data and included code before sharing
+the bundle; the recipient reconfirms with `replay --allow-exec` using the installed CLI.
+
+## Diagnosing a fixture
+
+```
+uv run reproseed diagnose --config examples/threshold/reproseed.toml
+uv run reproseed diagnose --config examples/threshold/reproseed.toml --format json
+uv run reproseed diagnose --config examples/threshold/reproseed.toml --allow-exec
+uv run reproseed diagnose --config examples/threshold/reproseed.toml --allow-exec --format json
+```
+
+Generate the example first with `uv run python examples/threshold/generate.py`.
+The default text output checks configuration, explicit assets, a private consistent SQLite
+snapshot, the reducer's supported schema subset, integrity and foreign keys. It gives actual
+per-table counts and the oracle contract/limits. Without `--allow-exec`, no application or
+oracle launches. Static exit 0 means structural readiness; it does not confirm a failure.
+
+With `--allow-exec`, diagnosis runs three fresh baseline attempts, unless an interruption
+or hard nonlaunch blocks completion. Every completed classification is shown, including
+PASS and UNRESOLVED. All three must be TARGET_FAILURE; a matching exit alone is insufficient.
+Each attempt gets pristine database and supporting-file copies. Diagnosis produces no bundle
+and writes no evidence beside the source. It omits argv, marker values, paths, raw process
+output, rows and environment data from its output. Readiness does not guarantee that a later
+reduction or final verification will succeed. See the [diagnostic format](docs/diagnostics.md).
+
+Diagnostic exits: 0 static checks passed or requested baseline confirmed; 1 executed-mode
+baseline not established; 2 invalid configuration/schema/input; 130 interrupted.
 
 ## Inspecting a bundle
 
@@ -145,7 +182,7 @@ This does not authenticate the manifest or provide complete hostile-filesystem r
 Windows Job Object assignment has startup/host-policy limitations; POSIX detached children
 can escape process-group cleanup. Deadlines and bounded cleanup prevent indefinite pipe waits.
 
-CLI exits: 0 verified success/inspection, 1 failure not confirmed, 2 usage/config/schema/bundle
+CLI exits: 0 verified success/inspection/static diagnosis, 1 failure not confirmed, 2 usage/config/schema/bundle
 error, 130 interrupted before verification completed. The oracle's expected exit is separate.
 inspect never executes the oracle. Reports contain bounded classification metadata, not row
 values or raw output. No original database or candidate history is exported. A consistent
@@ -171,3 +208,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md), [architecture](docs/architecture.md),
 and [M1b.1 evidence](docs/m1b1-completion.md).
 The [M1b.1.1 cancellation repair evidence](docs/m1b1-1-completion.md) distinguishes injected
 boundary tests from platform-specific real-signal tests and records their limits.
+See [M1b.2 completion evidence](docs/m1b2-completion.md) for the new fixtures, diagnostics and
+local validation. M1b.2 hosted CI remains pending Dan's review, commit and push.

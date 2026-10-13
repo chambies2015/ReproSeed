@@ -1,0 +1,14 @@
+version = 1
+source = "fixture.sqlite3"
+include = ["app.py", "oracle.py"]
+
+[oracle]
+argv = ["{python}", "oracle.py", "{db}"]
+expected_exit = 45
+marker = "REPROSEED_APPROVAL_CYCLE"
+stream = "stdout"
+timeout_seconds = 5.0
+output_limit_bytes = 65536
+
+[reduction]
+max_invocations = 400

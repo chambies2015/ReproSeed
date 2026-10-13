@@ -11,6 +11,7 @@ from pathlib import Path
 from reproseed import __version__
 from reproseed.artifacts import BundleError, acquire_bundle, create_bundle, replay_bundle
 from reproseed.config import ConfigError, load_config
+from reproseed.diagnostics import diagnose, format_diagnosis, serialize_diagnosis
 from reproseed.inspection import format_inspection
 from reproseed.sqlite_adapter import DatabaseError
 from reproseed.workflow import VerificationError
@@ -23,6 +24,21 @@ def parser() -> argparse.ArgumentParser:
     )
     result.add_argument("--version", action="version", version=__version__)
     commands = result.add_subparsers(dest="command", required=True)
+    diagnose_command = commands.add_parser(
+        "diagnose", help="check fixture readiness; optionally run three baseline confirmations"
+    )
+    diagnose_command.add_argument(
+        "--config", type=Path, required=True, help="version 1 TOML configuration"
+    )
+    diagnose_command.add_argument(
+        "--allow-exec", action="store_true", help="execute oracle with your OS permissions"
+    )
+    diagnose_command.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="readable text (default) or diagnostic JSON",
+    )
     reduce = commands.add_parser("reduce", help="verify, reduce, and export a new replay bundle")
     reduce.add_argument("--config", type=Path, required=True, help="version 1 TOML configuration")
     reduce.add_argument(
@@ -58,7 +74,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     try:
-        if arguments.command == "reduce":
+        if arguments.command == "diagnose":
+            diagnosis = diagnose(arguments.config, allow_exec=arguments.allow_exec)
+            print(
+                serialize_diagnosis(diagnosis)
+                if arguments.format == "json"
+                else format_diagnosis(diagnosis)
+            )
+            return diagnosis.exit_code
+        elif arguments.command == "reduce":
             report = create_bundle(load_config(arguments.config), arguments.out)
             summary = {
                 key: report[key]

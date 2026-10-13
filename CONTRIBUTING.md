@@ -11,6 +11,8 @@ uv run mypy
 uv run mypy --platform linux
 uv run --locked python -c "from pathlib import Path; Path('.validation').mkdir(exist_ok=True)"
 uv run pytest --basetemp=.validation/pytest
+uv run pytest tests/test_diagnose_cli.py tests/test_diagnostics.py tests/test_realistic_acceptance.py --basetemp=.validation/pytest-focused
+uv run --locked python tests/milestone_smoke.py --directory .validation/m1b2-measurements-fresh
 uv run --locked python tests/compatibility_smoke.py --directory .validation/pre-m1b-v1-fresh
 uv build --no-sources
 ```
@@ -33,6 +35,19 @@ default JSON, explicit JSON and text, relocate and replay it. Do not let an edit
 installation hide a broken wheel. The compatibility recipe requires a new tool-owned
 scratch directory under `.validation`; it generates a genuine version-1 bundle from the
 reviewed pre-M1b source before checking the current reader and replay.
+
+The installed-wheel threshold smoke also exercises default-text static diagnosis and
+JSON static/executable diagnosis. Use `tests/milestone_smoke.py --directory <new-directory>
+--python <installed-interpreter> --cli <installed-console>` for all four measured examples.
+Run it outside the checkout with an isolated wheel installation. It records counts, actual
+invocations, budget, cache/acceptance summaries, elapsed reduction time, file sizes and
+source/bundle hash equality. It checks retained values/schema/metadata and replays relocated
+bundles after original example paths are made unavailable. Large reductions belong in the
+acceptance suite and explicit measurement recipe, not repeated in small formatting tests.
+
+Diagnostic regressions use real subprocesses for outcome/limit/mutation contracts, focused
+interruption injection for launch-accounting boundaries, and a separate POSIX SIGINT test.
+Record these separately by platform; Windows injection is not console Ctrl+C coverage.
 
 Cancellation regressions inject one-shot exceptions at meaningful search publication and
 invocation-accounting boundaries. Retain deterministic coverage for pending acceptance,
@@ -62,4 +77,4 @@ Keep source acquisition, candidate state and oracle state separate. Preserve val
 schema. Add meaningful regression cases for contracts changed by a patch. Do not weaken
 acceptance assertions or silently skip failures. Read AGENTS.md before implementation and
 SECURITY.md before executing external oracle code. Publishing and later roadmap milestones
-are outside M1b.1.2.
+are outside M1b.2.

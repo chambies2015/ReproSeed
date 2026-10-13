@@ -56,19 +56,29 @@ Observe owned process completion before removing disposable oracle state, with o
 cleanup allowance, explicit resource ownership and persistent-obstruction warnings. Strengthen
 readiness and separate process-termination/directory-removal evidence; retain deterministic
 accounting/cleanup tests and finite Windows stability probes. See
-[M1b.1.2 completion evidence](m1b1-2-completion.md). Hosted validation of the uncommitted repair
-remains pending Dan's review, commit and push; local success and earlier runs do not establish it.
+[M1b.1.2 completion evidence](m1b1-2-completion.md). The hosted gate was accepted on commit
+`5e72f68fc5133d9f343537ba7472ca0a0b186289` in
+[run 38471526956](https://github.com/chambies2015/ReproSeed/actions/runs/38471526956): Ubuntu
+Python 3.12, Ubuntu Python 3.14 and Windows Python 3.12 all succeeded. The historical report
+retains the local observations available when it was written; this acceptance records the
+later hosted result without rewriting that history.
 
 ## M1b.2 — demanding synthetic fixtures and targeted diagnostics
 
-Add additional demanding synthetic fixtures and focused diagnostics within the existing
-adapter and oracle contracts. Use observed failures to choose the work; do not expand schema
-support, add new algorithms or change delivery surfaces as part of M1b.1, M1b.1.1 or M1b.1.2.
+Add realistic reservation-overbooking and two-node approval-cycle applications with
+independent semantic oracles, large relational decoy fixtures and relocated-replay evidence.
+Add static configuration/schema readiness and optional three-confirmation executable
+diagnosis, with terminal-safe text and separately versioned diagnostic JSON. Preserve the
+adapter subset, ordinary reducer ordering, process protections and bundle/report version 1.
+See [completion evidence](m1b2-completion.md). Hosted M1b.2 validation remains pending Dan's
+review, commit and push. This is the final planned M1b feature milestone before M2.
 
 ## M2 — broader SQLite support
 
 Extend schema support deliberately, with preserved-value semantics and rejection tests.
 Improve reduction strategies and investigate more precise local minimality evidence.
+Choose supported additions explicitly and extend source/candidate/bundle/replay validation
+together. M1b.2 diagnostics continue to reject unsupported shapes; no M2 support is implemented.
 
 ## M3 — PostgreSQL
 

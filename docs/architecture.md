@@ -1,4 +1,4 @@
-# M1b.1.2 architecture
+# M1b.2 architecture
 
 The contract is: smaller fixture, same specified failure, independently replayable evidence.
 "Same" is the configured exit/marker contract. ReproSeed does not infer semantic equivalence
@@ -114,6 +114,31 @@ An exhausted single-row closure pass is not proof of global minimality, especial
 unresolved trials. Baseline/final failures publish no verified bundle. Reproducibility still
 depends on external executables, interpreter, dependencies and environment; those are not
 captured as a universal execution environment.
+
+## Diagnosis
+
+`diagnose --config ...` is a separate readiness entry point with default readable text and
+opt-in JSON. `diagnostics.py` loads the same strict version-1 configuration, checks and copies
+explicit assets privately, acquires a WAL-aware read-only-source snapshot and calls
+`DatabaseModel.from_database` unchanged. It does not implement a second schema validator or
+invoke reduction. Static checks return actual table counts and structural suitability;
+oracle execution and baseline reproduction remain explicitly untested.
+
+`--allow-exec` uses the existing `InvocationCounter` and `run_oracle` for exactly three fresh
+baseline attempts unless interruption or hard nonlaunch prevents completion. Executed PASS
+and UNRESOLVED attempts do not short-circuit the three observations or count as confirmations.
+The privately frozen database/assets are restaged per invocation; application mutations
+cannot become later baseline inputs. All three TARGET_FAILURE outcomes establish only the
+baseline now, with no promise of successful search or final verification.
+
+The [diagnostic document](diagnostics.md) has its own `diagnostic_version = 1`; report.json
+and replay.toml remain version 1 unchanged. Diagnostic metadata describes actual completed
+outcomes, known executions, known nonlaunches and uncertain interrupted launches. A further
+interruption during counter recovery sets accounting completeness false and exits 130.
+Missing result metadata is never invented. JSON remains parseable for invalid inputs and
+handled interruption; curated cause codes avoid echoing source paths or configuration
+secrets. Text escapes terminal controls and explains why an exit code alone is insufficient.
+No bundle or evidence file is created beside user inputs.
 
 Version-1 evidence validation checks required typed fields and nested records, supported
 outcomes/termination reasons, nonnegative finite durations, table-name/count consistency,

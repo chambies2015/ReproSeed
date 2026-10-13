@@ -60,6 +60,7 @@ jobs:
         run: |
           uv run --locked python - <<'PY'
           import hashlib
+          import json
           import os
           import shutil
           import subprocess
@@ -102,6 +103,33 @@ jobs:
                   [str(python), str(example / "generate.py")],
                   cwd=outside, env=environment, check=True,
               )
+              source_hashes = file_hashes(example)
+              subprocess.run(
+                  [str(cli), "diagnose", "--config", str(example / "reproseed.toml")],
+                  cwd=outside, env=environment, check=True, timeout=60,
+              )
+              for execute in (False, True):
+                  arguments = [
+                      str(cli), "diagnose", "--config", str(example / "reproseed.toml"),
+                      "--format", "json",
+                  ]
+                  if execute:
+                      arguments.append("--allow-exec")
+                  diagnostic = json.loads(subprocess.check_output(
+                      arguments, cwd=outside, env=environment, text=True, timeout=60,
+                  ))
+                  assert diagnostic["diagnostic_version"] == 1
+                  assert diagnostic["table_counts"] == {"crates": 3, "parcels": 8}
+                  assert diagnostic["total_rows"] == 11
+                  assert diagnostic["oracle_executed"] is execute
+                  assert diagnostic["baseline_confirmed"] is execute
+                  assert diagnostic["actual_invocations"] == (3 if execute else 0)
+                  assert len(diagnostic["baseline_results"]) == (3 if execute else 0)
+                  assert all(
+                      record["outcome"] == "TARGET_FAILURE" and record["executed"]
+                      for record in diagnostic["baseline_results"]
+                  )
+              assert file_hashes(example) == source_hashes
               bundle = outside / "bundle"
               subprocess.run(
                   [str(cli), "reduce", "--config", str(example / "reproseed.toml"),
@@ -130,5 +158,5 @@ jobs:
               after = hashlib.sha256((relocated / "fixture.sqlite3").read_bytes()).hexdigest()
               assert after == before
               assert file_hashes(relocated) == original_bundle_hashes
-          print("Installed wheel CLI reduced, inspected, and replayed outside the checkout.")
+          print("Installed wheel CLI diagnosed, reduced, inspected, and replayed outside the checkout.")
           PY

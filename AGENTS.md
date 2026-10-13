@@ -1,6 +1,6 @@
 # Engineering guidance
 
-ReproSeed M1b.1.1 is a local Python 3.12+ CLI with a standard-library-only runtime.
+ReproSeed M1b.2 is a local Python 3.12+ CLI with a standard-library-only runtime.
 Architecture and scope are described in docs/architecture.md and docs/roadmap.md.
 
 ## Module boundaries
@@ -15,6 +15,8 @@ Architecture and scope are described in docs/architecture.md and docs/roadmap.md
 - artifacts.py owns private bundle acquisition, portable replay configuration and hash verification.
 - report.py owns typed version-1 evidence checks.
 - inspection.py displays validated data and does not parse bundles or execute code.
+- diagnostics.py reuses configuration, snapshot/model validation and invocation accounting
+  for readiness checks and optional baseline execution; it never reduces or creates bundles.
 - cli.py owns argument parsing, acknowledgement and user-facing exit codes.
 
 Keep these interfaces small and typed. Do not add speculative plugin infrastructure.
@@ -54,6 +56,10 @@ Use synthetic fixtures and real SQLite/subprocess integration tests. Preserve us
 - JSON inspection preserves the version-1 report shape; text inspection escapes terminal controls.
 - Shells, eval and arbitrary format expressions do not belong in oracle execution.
 - inspect is read-only and never executes code. reduce/replay require --allow-exec.
+- diagnose is static by default; only --allow-exec runs three fresh baseline attempts.
+  Static success establishes structural suitability, never reproduction. Preserve every
+  observed PASS/UNRESOLVED result and interrupted launch uncertainty without majority voting.
+- Diagnostic JSON is independently versioned; preserve report/replay version 1 unchanged.
 - Source protection is a tool behavior, not a sandbox against authorized arbitrary oracle code.
 
 ## Commands
@@ -66,6 +72,8 @@ uv run mypy
 uv run mypy --platform linux
 uv run --locked python -c "from pathlib import Path; Path('.validation').mkdir(exist_ok=True)"
 uv run pytest --basetemp=.validation/pytest
+uv run pytest tests/test_diagnose_cli.py tests/test_diagnostics.py tests/test_realistic_acceptance.py --basetemp=.validation/pytest-focused
+uv run --locked python tests/milestone_smoke.py --directory .validation/m1b2-measurements-fresh
 uv run --locked python tests/compatibility_smoke.py --directory .validation/pre-m1b-v1-fresh
 uv build --no-sources
 ```
