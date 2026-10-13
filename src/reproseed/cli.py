@@ -9,8 +9,9 @@ import sys
 from pathlib import Path
 
 from reproseed import __version__
-from reproseed.artifacts import BundleError, create_bundle, replay_bundle, validate_bundle
+from reproseed.artifacts import BundleError, acquire_bundle, create_bundle, replay_bundle
 from reproseed.config import ConfigError, load_config
+from reproseed.inspection import format_inspection
 from reproseed.sqlite_adapter import DatabaseError
 from reproseed.workflow import VerificationError
 
@@ -34,6 +35,12 @@ def parser() -> argparse.ArgumentParser:
         "inspect", help="verify hashes and read report; never run the oracle"
     )
     inspect.add_argument("bundle", type=Path)
+    inspect.add_argument(
+        "--format",
+        choices=("json", "text"),
+        default="json",
+        help="report JSON (default) or a compact summary; neither executes the oracle",
+    )
     replay = commands.add_parser("replay", help="verify hashes and reconfirm on three fresh copies")
     replay.add_argument("bundle", type=Path)
     replay.add_argument(
@@ -63,13 +70,16 @@ def main(argv: list[str] | None = None) -> int:
                     "verified",
                 )
             }
-            print(json.dumps(summary, indent=2))
+            print(json.dumps(summary, indent=2, allow_nan=False))
         elif arguments.command == "inspect":
-            _, report = validate_bundle(arguments.bundle)
-            print(json.dumps(report, indent=2))
+            with acquire_bundle(arguments.bundle) as acquired:
+                if arguments.format == "text":
+                    print(format_inspection(acquired.report, acquired.manifest))
+                else:
+                    print(json.dumps(acquired.report, indent=2, allow_nan=False))
         else:
             result = replay_bundle(arguments.bundle)
-            print(json.dumps(result, indent=2))
+            print(json.dumps(result, indent=2, allow_nan=False))
             return 0 if result["outcome"] == "TARGET_FAILURE" else 1
         return 0
     except VerificationError as exc:

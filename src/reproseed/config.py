@@ -104,12 +104,17 @@ def _integer(value: object, minimum: int, maximum: int, label: str) -> int:
 def load_config(path: Path) -> Config:
     path = path.resolve()
     try:
-        if path.stat().st_size > 1024 * 1024:
-            raise ConfigError("configuration exceeds 1 MiB")
         with path.open("rb") as file:
-            raw = tomllib.load(file)
-    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
-        raise ConfigError(f"cannot read TOML configuration: {exc}") from exc
+            data = file.read(1024 * 1024 + 1)
+        if len(data) > 1024 * 1024:
+            raise ConfigError("configuration exceeds 1 MiB")
+        raw = tomllib.loads(data.decode("utf-8"))
+    except ConfigError:
+        raise
+    except (OSError, ValueError, RecursionError) as exc:
+        raise ConfigError(
+            "cannot read TOML configuration: malformed UTF-8/TOML or excessive nesting"
+        ) from exc
     root = _fields(raw, {"version", "source", "include", "oracle", "reduction"}, "configuration")
     _integer(root["version"], 1, 1, "version")
     source_value = root["source"]
@@ -165,8 +170,8 @@ def load_config(path: Path) -> Config:
     timeout = oracle["timeout_seconds"]
     if (
         type(timeout) not in (int, float)
-        or not math.isfinite(cast(float, timeout))
         or not 0.01 <= cast(float, timeout) <= 3600
+        or not math.isfinite(cast(float, timeout))
     ):
         raise ConfigError("oracle.timeout_seconds must be finite and between 0.01 and 3600")
     reduction = _fields(root["reduction"], {"max_invocations"}, "reduction")

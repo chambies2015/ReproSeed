@@ -32,8 +32,9 @@ host job policies may reject assignment. Bounded taskkill /T /F plus direct proc
 provide best-effort fallback. Descendants that detach or outlive an unassigned parent can
 escape. Cleanup and temporary-directory removal cannot guarantee removal of files held by
 escaped processes. The runner returns within finite process/cleanup bounds rather than
-waiting indefinitely for pipe EOF. Only Windows cleanup has been exercised locally here;
-POSIX behavior is covered by configured CI, not a claimed hosted result.
+waiting indefinitely for pipe EOF. Platform execution evidence belongs in the milestone
+completion reports. The accepted M1a.1 hosted run covers Ubuntu/Python 3.12 and 3.14 and
+Windows/Python 3.12 at its reviewed commit; it does not validate later working changes.
 
 ## Data and bundle sharing
 
@@ -48,12 +49,36 @@ symlinks, junctions and recursive directory collection are rejected. This avoids
 collection; an explicitly selected file can still contain secrets. Reports omit row values
 and raw process output. The bundle omits original/candidate database history.
 
-Replay checks versioned manifests and hashes before execution, rejects paths escaping the
-bundle and runs on fresh temporary copies. Hashes detect changes relative to the manifest;
-they do not authenticate an untrusted bundle. Someone who changes both an artifact and its
-manifest can supply new executable code. External executables and dependencies are not
-included automatically. Source and bundled files remain unchanged by tool operations;
-arbitrary oracle code is subject to the execution trust boundary above.
+Inspection and replay capture bounded manifest metadata and validate safe declared artifact
+names, then copy only those files into one tool-owned private payload. They verify the copied
+bytes against the captured hashes and validate the copied report/configuration before any
+oracle execution. SQLite schema, integrity, foreign keys and reported final row counts are
+checked on a separate private database copy. Finalized bundles with any
+`fixture.sqlite3-wal`, `fixture.sqlite3-shm` or `fixture.sqlite3-journal` beside the fixture
+are rejected, including empty sidecars, without deleting or incorporating those files.
+This static-bundle policy does not change WAL-aware snapshotting of normal reduction sources.
+
+Replay sources every fresh disposable database and asset copy from this verified private
+payload. After acquisition it does not reread the original bundle configuration or assets;
+oracle writes cannot contaminate subsequent confirmations or pristine payload bytes through
+the paths supplied by ReproSeed. Inspection never runs the oracle, needs no `--allow-exec`,
+and opens only private database copies for SQLite checks. Default/explicit JSON inspection
+retains the existing report shape; text inspection escapes terminal controls in displayed
+strings and distinguishes checks performed now from recorded confirmations.
+
+Hashes establish that copied contents match a supplied manifest. Evidence checks establish
+structural consistency of recorded metadata, with version-1 interruption accounting limits.
+Fixture checks establish structure and final counts. None of these establish that a new
+replay reproduced the target, authenticate authorship, or prove a claimed historical
+execution happened. A person who changes both artifacts and manifest can supply new code
+and consistent records. Only an explicitly acknowledged replay executes new confirmations.
+
+Private acquisition prevents drift from the copied, hashed payload used for execution. It
+does not provide complete hostile-filesystem race immunity, operating-system isolation, or
+protection against someone with arbitrary access to the user's process or private temporary
+directories. External executables and dependencies are not included automatically. Supplied
+source and bundle files remain unchanged by tool operations; arbitrary oracle code remains
+subject to the execution trust boundary above.
 
 For a suspected vulnerability, contact the repository owner privately through an available
 GitHub contact channel before sharing sensitive proof data. Do not include real databases,

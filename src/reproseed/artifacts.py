@@ -4,19 +4,31 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import platform
 import shutil
 import sqlite3
 import tempfile
 import tomllib
-from dataclasses import replace
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
 
 from reproseed import __version__
-from reproseed.config import Asset, Config, ConfigError, load_config, relative_name, safe_file
+from reproseed.config import (
+    RESERVED,
+    Asset,
+    Config,
+    ConfigError,
+    load_config,
+    relative_name,
+    safe_file,
+)
 from reproseed.oracle import Outcome, run_oracle
-from reproseed.sqlite_adapter import validate_database
+from reproseed.report import ReportError, validate_report
+from reproseed.sqlite_adapter import DatabaseError, DatabaseModel
 from reproseed.workflow import build_verified_fixture
 
 
@@ -33,13 +45,17 @@ def sha256(path: Path) -> str:
 
 
 def write_json(path: Path, value: object) -> None:
-    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        encoded = json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    except (ValueError, TypeError, RecursionError) as exc:
+        raise BundleError("cannot serialize finite JSON metadata") from exc
+    path.write_text(encoded, encoding="utf-8")
 
 
 def replay_toml(config: Config) -> str:
     def quote(value: object) -> str:
         # TOML does not accept JSON's UTF-16 surrogate-pair escapes.
-        return json.dumps(value, ensure_ascii=False)
+        return json.dumps(value, ensure_ascii=False, allow_nan=False)
 
     return (
         'version = 1\nsource = "fixture.sqlite3"\n'
@@ -131,93 +147,236 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key, value in pairs:
         if key in result:
-            raise BundleError(f"duplicate JSON key: {key}")
+            raise BundleError("duplicate JSON key")
         result[key] = value
     return result
 
 
+JSON_LIMIT = 64 * 1024 * 1024
+JSON_DEPTH_LIMIT = 64
+
+
+def _bounded_read(path: Path, limit: int, label: str) -> bytes:
+    with path.open("rb") as file:
+        data = file.read(limit + 1)
+    if len(data) > limit:
+        raise BundleError(f"{label} exceeds {limit} bytes")
+    return data
+
+
+def _finite_float(value: str) -> float:
+    result = float(value)
+    if not math.isfinite(result):
+        raise BundleError("JSON numbers must be finite")
+    return result
+
+
+def _reject_constant(value: str) -> object:
+    raise BundleError("JSON numbers must be finite")
+
+
+def _check_json_depth(value: object) -> None:
+    pending: list[tuple[Iterator[object], int]] = [(iter((value,)), 1)]
+    while pending:
+        nodes, depth = pending[-1]
+        try:
+            node = next(nodes)
+        except StopIteration:
+            pending.pop()
+            continue
+        if isinstance(node, (dict, list)):
+            if depth > JSON_DEPTH_LIMIT:
+                raise BundleError(f"JSON nesting exceeds {JSON_DEPTH_LIMIT} levels")
+            children = node.values() if isinstance(node, dict) else node
+            pending.append((iter(children), depth + 1))
+
+
 def read_json(path: Path) -> dict[str, object]:
-    if path.stat().st_size > 64 * 1024 * 1024:
-        raise BundleError(f"JSON file exceeds 64 MiB: {path.name}")
     try:
-        value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique_object)
-    except (OSError, ValueError) as exc:
-        raise BundleError(f"cannot parse {path.name}: {exc}") from exc
+        data = _bounded_read(path, JSON_LIMIT, "JSON file")
+        value = json.loads(
+            data.decode("utf-8"),
+            object_pairs_hook=_unique_object,
+            parse_float=_finite_float,
+            parse_constant=_reject_constant,
+        )
+        _check_json_depth(value)
+    except BundleError:
+        raise
+    except (OSError, ValueError, RecursionError) as exc:
+        raise BundleError(
+            "cannot parse JSON metadata: malformed UTF-8/JSON or excessive nesting"
+        ) from exc
     if not isinstance(value, dict):
-        raise BundleError(f"{path.name} must contain a JSON object")
+        raise BundleError("JSON metadata must contain an object")
     return cast(dict[str, object], value)
 
 
-def validate_bundle(bundle: Path) -> tuple[Config, dict[str, object]]:
+def _manifest(root: Path) -> tuple[dict[str, object], dict[str, str]]:
+    manifest = read_json(safe_file(root, "manifest.json"))
+    if set(manifest) != {
+        "version",
+        "tool",
+        "tool_version",
+        "runtime",
+        "hash_algorithm",
+        "artifacts",
+    }:
+        raise BundleError("manifest has missing or unknown fields")
+    if type(manifest["version"]) is not int or manifest["version"] != 1:
+        raise BundleError("unsupported manifest version")
+    if manifest["tool"] != "reproseed" or manifest["hash_algorithm"] != "sha256":
+        raise BundleError("unsupported manifest tool or hash algorithm")
+    runtime = manifest["runtime"]
+    if (
+        not isinstance(manifest["tool_version"], str)
+        or not isinstance(runtime, dict)
+        or set(runtime) != {"python", "sqlite"}
+        or any(not isinstance(v, str) for v in runtime.values())
+    ):
+        raise BundleError("invalid tool/runtime metadata")
+    artifacts = manifest["artifacts"]
+    if not isinstance(artifacts, dict):
+        raise BundleError("manifest.artifacts must map names to SHA256 digests")
+    required = {"fixture.sqlite3", "replay.toml", "report.json", "README.md"}
+    if not required.issubset(artifacts):
+        raise BundleError("manifest is missing required artifacts")
+    folded: set[str] = set()
+    reserved = {name.casefold() for name in RESERVED}
+    for name, digest in artifacts.items():
+        relative_name(name)
+        key = name.casefold()
+        if (
+            key in folded
+            or any(key.startswith(n + "/") or n.startswith(key + "/") for n in folded)
+            or (name not in required and name.split("/")[0].casefold() in reserved)
+        ):
+            raise BundleError("manifest has reserved, duplicate or conflicting artifact names")
+        folded.add(key)
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(c not in "0123456789abcdef" for c in digest)
+        ):
+            raise BundleError(f"invalid digest for {name!r}")
+    return manifest, cast(dict[str, str], artifacts)
+
+
+def _reject_sidecars(root: Path) -> None:
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = root / ("fixture.sqlite3" + suffix)
+        if sidecar.exists() or sidecar.is_symlink() or sidecar.is_junction():
+            raise BundleError(
+                "static bundle fixture must not have SQLite WAL, SHM or journal sidecars"
+            )
+
+
+def _copy_payload(root: Path, destination: Path, artifacts: dict[str, str]) -> None:
+    """Copy only declared regular files; mode bits preserve POSIX executable assets."""
+    for name in artifacts:
+        source = safe_file(root, name)
+        target = destination / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if name in {"report.json", "replay.toml"}:
+            limit = JSON_LIMIT if name == "report.json" else 1024 * 1024
+            target.write_bytes(_bounded_read(source, limit, name))
+        else:
+            shutil.copy2(source, target)
+
+
+@dataclass(frozen=True)
+class VerifiedBundle:
+    """Verified private payload; paths are usable only inside acquire_bundle's context."""
+
+    root: Path
+    config: Config
+    report: dict[str, object]
+    manifest: dict[str, object]
+
+
+@contextmanager
+def acquire_bundle(bundle: Path) -> Iterator[VerifiedBundle]:
+    """Capture metadata, copy/hash payload, then validate without opening original SQLite."""
     if bundle.is_symlink() or bundle.is_junction() or not bundle.is_dir():
         raise BundleError("bundle must be a regular directory, without a symlink or junction")
     root = bundle.resolve()
     try:
-        manifest = read_json(safe_file(root, "manifest.json"))
-        if set(manifest) != {
-            "version",
-            "tool",
-            "tool_version",
-            "runtime",
-            "hash_algorithm",
-            "artifacts",
-        }:
-            raise BundleError("manifest has missing or unknown fields")
-        if type(manifest["version"]) is not int or manifest["version"] != 1:
-            raise BundleError("unsupported manifest version")
-        if manifest["tool"] != "reproseed" or manifest["hash_algorithm"] != "sha256":
-            raise BundleError("unsupported manifest tool or hash algorithm")
-        runtime = manifest["runtime"]
-        if (
-            not isinstance(manifest["tool_version"], str)
-            or not isinstance(runtime, dict)
-            or set(runtime) != {"python", "sqlite"}
-            or any(not isinstance(v, str) for v in runtime.values())
-        ):
-            raise BundleError("invalid tool/runtime metadata")
-        artifacts = manifest["artifacts"]
-        if not isinstance(artifacts, dict):
-            raise BundleError("manifest.artifacts must map names to SHA256 digests")
-        for name, digest in artifacts.items():
-            relative_name(name)
-            if (
-                not isinstance(digest, str)
-                or len(digest) != 64
-                or any(c not in "0123456789abcdef" for c in digest)
-            ):
-                raise BundleError(f"invalid digest for {name}")
-            if sha256(safe_file(root, name)) != digest:
-                raise BundleError(f"artifact hash mismatch: {name}")
-        required = {"fixture.sqlite3", "replay.toml", "report.json", "README.md"}
-        if not required.issubset(artifacts):
-            raise BundleError("manifest is missing required artifacts")
-        replay_path = safe_file(root, "replay.toml")
-        if replay_path.stat().st_size > 1024 * 1024:
-            raise BundleError("replay configuration exceeds 1 MiB")
-        with replay_path.open("rb") as file:
-            replay = tomllib.load(file)
-        if replay.get("source") != "fixture.sqlite3":
-            raise BundleError("replay source must be the bundled fixture.sqlite3")
-        config = load_config(replay_path)
-        if set(artifacts) != required | {asset.relative for asset in config.assets}:
-            raise BundleError("manifest files do not match replay assets and required files")
-        report = read_json(safe_file(root, "report.json"))
-        if type(report.get("version")) is not int or report["version"] != 1:
-            raise BundleError("unsupported report version")
-        if report.get("verified") is not True:
-            raise BundleError("bundle report does not declare a verified fixture")
-        return config, report
-    except (ConfigError, OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
+        manifest, artifacts = _manifest(root)
+        _reject_sidecars(root)
+        with tempfile.TemporaryDirectory(prefix="reproseed-bundle-") as temporary:
+            private = Path(temporary)
+            payload = private / "payload"
+            payload.mkdir()
+            _copy_payload(root, payload, artifacts)
+            _reject_sidecars(root)
+            for name, digest in artifacts.items():
+                if sha256(payload / name) != digest:
+                    raise BundleError(f"artifact hash mismatch: {name!r}")
+            replay_path = payload / "replay.toml"
+            try:
+                replay = tomllib.loads(
+                    _bounded_read(replay_path, 1024 * 1024, "replay configuration").decode("utf-8")
+                )
+            except BundleError:
+                raise
+            except (ValueError, RecursionError) as exc:
+                raise BundleError(
+                    "invalid replay configuration: malformed UTF-8/TOML or numeric input"
+                ) from exc
+            if replay.get("source") != "fixture.sqlite3":
+                raise BundleError("replay source must be the bundled fixture.sqlite3")
+            config = load_config(replay_path)
+            required = {"fixture.sqlite3", "replay.toml", "report.json", "README.md"}
+            if set(artifacts) != required | {asset.relative for asset in config.assets}:
+                raise BundleError("manifest files do not match replay assets and required files")
+            report = read_json(payload / "report.json")
+            validate_report(report, config)
+            # SQLite may create SHM even on a read-only WAL connection. Open only a
+            # separate disposable validation copy, leaving the hashed payload pristine.
+            check = private / "check"
+            check.mkdir()
+            fixture = check / "fixture.sqlite3"
+            shutil.copyfile(config.source, fixture)
+            if DatabaseModel.from_database(fixture).counts() != report["final_counts"]:
+                raise BundleError("fixture table counts disagree with report.final_counts")
+            yield VerifiedBundle(payload, config, report, manifest)
+    except ConfigError as exc:
+        raise BundleError("invalid replay configuration or unsafe bundle artifact path") from exc
+    except ReportError as exc:
         raise BundleError(str(exc)) from exc
+    except DatabaseError as exc:
+        raise BundleError(
+            "fixture failed supported-schema, integrity or foreign-key validation"
+        ) from exc
+    except OSError as exc:
+        raise BundleError(
+            "cannot read or copy bundle files; check declared files and permissions"
+        ) from exc
+    except (UnicodeError, tomllib.TOMLDecodeError, RecursionError) as exc:
+        raise BundleError(
+            "invalid replay metadata: malformed UTF-8/TOML or excessive nesting"
+        ) from exc
+
+
+def validate_bundle(bundle: Path) -> tuple[Config, dict[str, object]]:
+    """Inspection compatibility API. Replay must retain acquire_bundle's private lifetime."""
+    with acquire_bundle(bundle) as acquired:
+        root = bundle.resolve()
+        config = replace(
+            acquired.config,
+            path=root / "replay.toml",
+            source=root / "fixture.sqlite3",
+            assets=tuple(Asset(a.relative, root / a.relative) for a in acquired.config.assets),
+        )
+        return config, acquired.report
 
 
 def replay_bundle(bundle: Path) -> dict[str, object]:
-    config, _ = validate_bundle(bundle)
-    with tempfile.TemporaryDirectory(prefix="reproseed-replay-") as temporary:
-        fixture = Path(temporary) / "fixture.sqlite3"
-        shutil.copyfile(config.source, fixture)
-        validate_database(fixture)
-        results = [run_oracle(config.oracle, fixture, config.assets).as_dict() for _ in range(3)]
+    with acquire_bundle(bundle) as acquired:
+        config = acquired.config
+        results = [
+            run_oracle(config.oracle, config.source, config.assets).as_dict() for _ in range(3)
+        ]
     outcomes = {result["outcome"] for result in results}
     if outcomes == {Outcome.TARGET_FAILURE.value}:
         outcome = Outcome.TARGET_FAILURE.value

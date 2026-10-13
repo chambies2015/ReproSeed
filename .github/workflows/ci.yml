@@ -67,6 +67,12 @@ jobs:
           import venv
           from pathlib import Path
 
+          def file_hashes(directory):
+              return {
+                  path.relative_to(directory).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+                  for path in directory.rglob("*") if path.is_file()
+              }
+
           repository = Path.cwd()
           wheels = list((repository / "dist").glob("*.whl"))
           assert len(wheels) == 1, wheels
@@ -102,10 +108,17 @@ jobs:
                    "--out", str(bundle), "--allow-exec"],
                   cwd=outside, env=environment, check=True,
               )
+              original_bundle_hashes = file_hashes(bundle)
               subprocess.run(
                   [str(cli), "inspect", str(bundle)],
                   cwd=outside, env=environment, check=True,
               )
+              for inspection_format in ("json", "text"):
+                  subprocess.run(
+                      [str(cli), "inspect", str(bundle), "--format", inspection_format],
+                      cwd=outside, env=environment, check=True,
+                  )
+              assert file_hashes(bundle) == original_bundle_hashes
               relocated = outside / "relocated-bundle"
               bundle.rename(relocated)
               example.rename(outside / "example-unavailable")
@@ -116,5 +129,6 @@ jobs:
               )
               after = hashlib.sha256((relocated / "fixture.sqlite3").read_bytes()).hexdigest()
               assert after == before
+              assert file_hashes(relocated) == original_bundle_hashes
           print("Installed wheel CLI reduced, inspected, and replayed outside the checkout.")
           PY

@@ -1,4 +1,4 @@
-# M0/M1a architecture
+# M1b.1 architecture
 
 The contract is: smaller fixture, same specified failure, independently replayable evidence.
 "Same" is the configured exit/marker contract. ReproSeed does not infer semantic equivalence
@@ -89,15 +89,75 @@ unresolved trials. Baseline/final failures publish no verified bundle. Reproduci
 depends on external executables, interpreter, dependencies and environment; those are not
 captured as a universal execution environment.
 
+Version-1 evidence validation checks required typed fields and nested records, supported
+outcomes/termination reasons, nonnegative finite durations, table-name/count consistency,
+sequential attempt references and the strictly decreasing accepted-reduction chain. Baseline
+and final records each require exactly three executed TARGET_FAILURE confirmations with the
+configured exit code; accepted candidates require two such confirmations. Actual booleans
+and integers are distinguished, so `true` is not a count or version. Unknown fields are
+rejected at the report, oracle-result, attempt, accepted-reduction and interrupted-record
+levels. Report and replay budget metadata must agree, and charged budget cannot exceed its
+configured limit. Evidence validation is separate from text formatting.
+
+Cached attempts can repeat earlier confirmation records, including their `executed` flags;
+those records are reused evidence, not additional subprocess executions. Validation requires
+matching prior uncached evidence, but version 1 lacks candidate identity sets, so matching
+counts/records do not establish identical retained row identities. Interrupted records
+distinguish known executions, known nonlaunches and unknown launches. Charged budget is known
+executions plus unknown launches. Cancellation during evaluation can discard the first
+completed confirmation; cancellation after an evaluation returns but before it is recorded
+can omit both. Validation checks the corresponding bounded accounting interval. Version 1
+cannot always reconstruct an exact execution ledger; it preserves uncertainty without
+inventing missing executions or treating historical records as independently observed.
+
 ## Bundles and CLI exits
 
 Version 1 bundles contain fixture.sqlite3, replay.toml, explicit assets, report.json,
 README.md and manifest.json. Manifest SHA256 hashes cover all required artifacts except
-the manifest itself. Runtime/tool versions are recorded. Replay requires required files,
-known manifest/report versions, matching asset lists, safe paths and hashes before running
-three fresh trials. inspect validates/reads without executing code. Hashes are integrity
-checks, not authentication. Other application dependencies remain external; the supplied
-demos need only Python and installed ReproSeed.
+the manifest itself. Runtime/tool versions are recorded. The writer retains this version-1
+format; display-only row totals and percentages are derived during text inspection.
+
+Inspection and replay share a private acquisition lifecycle:
+
+1. Read bounded manifest metadata, validate its version/shape and declared portable artifact
+   names, and reject traversal, symlinks, junctions and reserved-path conflicts.
+2. Reject `fixture.sqlite3-wal`, `fixture.sqlite3-shm` and `fixture.sqlite3-journal` alongside
+   the finalized fixture, including empty sidecars. Do not incorporate or delete these files.
+3. Copy only the declared payload to a tool-owned temporary directory, preserving supported
+   POSIX executable-file behavior, and compare copied bytes with the captured manifest hashes.
+4. Parse the copied replay configuration and report. Require known versions, an exact asset
+   list and consistent recorded evidence. No oracle executes before all checks succeed.
+5. Make a separate private database copy for supported-schema inspection, integrity and
+   foreign-key checks, and comparison of actual table counts with report `final_counts`.
+6. Inspect this validated data, or run three replay confirmations with fresh disposable
+   databases and asset copies sourced from the verified private payload. Keep its lifetime
+   explicit and clean up tool-owned temporary directories afterward.
+
+Once acquisition succeeds, replay does not reread original configuration, assets or fixture.
+Oracle mutations of one invocation cannot change pristine payload bytes or later trials.
+The original bundle database is not opened for SQLite checks that could create sidecars.
+A normal reduction source with committed WAL remains supported by its separate snapshot
+contract; a finalized bundle is a static artifact.
+
+JSON uses standard-library hooks: duplicate keys and non-finite numbers are rejected, actual
+reads are bounded at 64 MiB, and nesting beyond 64 levels is rejected. Replay configuration
+actual reads are bounded at 1 MiB. Malformed UTF-8/JSON, unsupported versions and wrongly typed
+metadata produce actionable bundle errors. JSON writes reject non-finite serialization.
+
+`inspect ./bundle` and `inspect ./bundle --format json` retain the report's existing JSON
+shape. `--format text` summarizes validated counts, budget, recorded confirmations and search
+termination without listing the attempt history. It escapes terminal controls in displayed
+strings, exposes no row values or raw process output, and explicitly says no oracle executed.
+Inspection needs no execution acknowledgement and leaves supplied bundle files unchanged.
+
+Keep four different claims separate: copied bytes match the captured manifest; recorded
+evidence is structurally consistent; the fixture is structurally valid and agrees with final
+counts; and a new replay reproduced the configured target in this invocation. The first three
+do not establish the fourth. Neither hashes nor consistent metadata authenticate an author
+or prove that a historical execution occurred. Private acquisition prevents execution from
+drifting away from copied, hashed bytes; it is neither an OS sandbox nor complete immunity
+to hostile-filesystem races or arbitrary access to the process/private temporary directory.
+Other application dependencies remain external; the demos need Python and installed ReproSeed.
 
 CLI codes differ from the oracle's expected failure code: 0 means verified reduction,
 successful inspection or TARGET_FAILURE replay; 1 means baseline/final verification failed
@@ -117,5 +177,6 @@ each unknown launch conservatively against the budget. Interruption records are 
 - [SQLite PRAGMAs](https://www.sqlite.org/pragma.html)
 - [Python 3.12 sqlite3](https://docs.python.org/3.12/library/sqlite3.html)
 - [Python 3.12 subprocess](https://docs.python.org/3.12/library/subprocess.html)
+- [Python 3.12 JSON](https://docs.python.org/3.12/library/json.html)
 - [Windows Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
 - [Windows PeekNamedPipe](https://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-peeknamedpipe)
