@@ -100,6 +100,7 @@ values or raw output. No original database or candidate history is exported.
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy
+uv run --locked python -c "from pathlib import Path; Path('.validation').mkdir(exist_ok=True)"
 uv run pytest --basetemp=.validation/pytest
 uv build --no-sources
 ```

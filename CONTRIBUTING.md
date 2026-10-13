@@ -9,12 +9,16 @@ uv run ruff check .
 uv run ruff format --check .
 uv run mypy
 uv run mypy --platform linux
+uv run --locked python -c "from pathlib import Path; Path('.validation').mkdir(exist_ok=True)"
 uv run pytest --basetemp=.validation/pytest
 uv build --no-sources
 ```
 
-The explicit pytest temporary root avoids restricted global temp-root enumeration on some
-Windows environments. Use a fresh name if another test process is using that directory.
+Create the `.validation` parent explicitly before pytest, including in a fresh checkout.
+The disposable `.validation/pytest` directory is reserved for pytest to remove and recreate;
+keep environments, caches and retained evidence elsewhere. This explicit temporary root
+avoids restricted global temp-root enumeration on some Windows environments. Use a fresh
+base-directory name if another test process is using that directory.
 Required acceptance tests use real database files and subprocesses. A symlink test requires
 Windows Developer Mode or symlink privileges; POSIX signal tests run only on POSIX. Record
 skips and environment failures honestly. CI covers Linux Python 3.12/3.14 and Windows 3.12;

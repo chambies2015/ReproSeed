@@ -44,6 +44,7 @@ uv run ruff check .
 uv run ruff format --check .
 uv run mypy
 uv run mypy --platform linux
+uv run --locked python -c "from pathlib import Path; Path('.validation').mkdir(exist_ok=True)"
 uv run pytest --basetemp=.validation/pytest
 uv build --no-sources
 ```

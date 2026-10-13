@@ -51,7 +51,9 @@ jobs:
       - name: Type check
         run: uv run --locked mypy
       - name: Test SQLite reduction and replay
-        run: uv run --locked pytest --basetemp=.validation/pytest
+        run: |
+          uv run --locked python -c "from pathlib import Path; Path('.validation').mkdir(exist_ok=True)"
+          uv run --locked pytest --basetemp=.validation/pytest
       - name: Build wheel and source distribution
         run: uv build --no-sources
       - name: Install and exercise the wheel outside the checkout
