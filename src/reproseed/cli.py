@@ -1,0 +1,87 @@
+"""Portable CLI with explicit acknowledgement before executing configured commands."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sqlite3
+import sys
+from pathlib import Path
+
+from reproseed import __version__
+from reproseed.artifacts import BundleError, create_bundle, replay_bundle, validate_bundle
+from reproseed.config import ConfigError, load_config
+from reproseed.sqlite_adapter import DatabaseError
+from reproseed.workflow import VerificationError
+
+
+def parser() -> argparse.ArgumentParser:
+    result = argparse.ArgumentParser(
+        prog="reproseed",
+        description="Reduce SQLite fixtures while reconfirming a specified failure.",
+    )
+    result.add_argument("--version", action="version", version=__version__)
+    commands = result.add_subparsers(dest="command", required=True)
+    reduce = commands.add_parser("reduce", help="verify, reduce, and export a new replay bundle")
+    reduce.add_argument("--config", type=Path, required=True, help="version 1 TOML configuration")
+    reduce.add_argument(
+        "--out", type=Path, required=True, help="new output directory (must not exist)"
+    )
+    reduce.add_argument(
+        "--allow-exec", action="store_true", help="execute oracle with your OS permissions"
+    )
+    inspect = commands.add_parser(
+        "inspect", help="verify hashes and read report; never run the oracle"
+    )
+    inspect.add_argument("bundle", type=Path)
+    replay = commands.add_parser("replay", help="verify hashes and reconfirm on three fresh copies")
+    replay.add_argument("bundle", type=Path)
+    replay.add_argument(
+        "--allow-exec", action="store_true", help="execute oracle with your OS permissions"
+    )
+    return result
+
+
+def main(argv: list[str] | None = None) -> int:
+    arguments = parser().parse_args(argv)
+    if arguments.command in {"reduce", "replay"} and not arguments.allow_exec:
+        print(
+            "reproseed: --allow-exec is required; configured code runs with your OS permissions",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        if arguments.command == "reduce":
+            report = create_bundle(load_config(arguments.config), arguments.out)
+            summary = {
+                key: report[key]
+                for key in (
+                    "original_counts",
+                    "final_counts",
+                    "oracle_invocations",
+                    "termination_reason",
+                    "verified",
+                )
+            }
+            print(json.dumps(summary, indent=2))
+        elif arguments.command == "inspect":
+            _, report = validate_bundle(arguments.bundle)
+            print(json.dumps(report, indent=2))
+        else:
+            result = replay_bundle(arguments.bundle)
+            print(json.dumps(result, indent=2))
+            return 0 if result["outcome"] == "TARGET_FAILURE" else 1
+        return 0
+    except VerificationError as exc:
+        print(f"reproseed: {exc}", file=sys.stderr)
+        return 1
+    except (ConfigError, BundleError, DatabaseError, OSError, sqlite3.Error) as exc:
+        print(f"reproseed: {exc}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        print("reproseed: interrupted before a verified bundle could be completed", file=sys.stderr)
+        return 130
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

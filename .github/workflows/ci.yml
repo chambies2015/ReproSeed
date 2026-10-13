@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.12"
+          - os: ubuntu-latest
+            python: "3.14"
+          - os: windows-latest
+            python: "3.12"
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv and select Python
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+      - name: Install locked development dependencies
+        run: uv sync --locked
+      - name: Lint
+        run: uv run --locked ruff check .
+      - name: Check formatting
+        run: uv run --locked ruff format --check .
+      - name: Type check
+        run: uv run --locked mypy
+      - name: Test SQLite reduction and replay
+        run: uv run --locked pytest --basetemp=.validation/pytest
+      - name: Build wheel and source distribution
+        run: uv build --no-sources
+      - name: Install and exercise the wheel outside the checkout
+        run: |
+          uv run --locked python - <<'PY'
+          import hashlib
+          import os
+          import shutil
+          import subprocess
+          import tempfile
+          import venv
+          from pathlib import Path
+
+          repository = Path.cwd()
+          wheels = list((repository / "dist").glob("*.whl"))
+          assert len(wheels) == 1, wheels
+          environment = dict(os.environ)
+          environment.pop("PYTHONPATH", None)
+          environment.pop("PYTHONHOME", None)
+          with tempfile.TemporaryDirectory(
+              prefix="reproseed-installed-wheel-", dir=os.environ["RUNNER_TEMP"]
+          ) as temporary:
+              outside = Path(temporary)
+              installation = outside / "installation"
+              venv.EnvBuilder(with_pip=True).create(installation)
+              bin_directory = installation / ("Scripts" if os.name == "nt" else "bin")
+              python = bin_directory / ("python.exe" if os.name == "nt" else "python")
+              cli = bin_directory / ("reproseed.exe" if os.name == "nt" else "reproseed")
+              subprocess.run(
+                  [str(python), "-m", "pip", "install", "--no-index", "--no-deps",
+                   "--disable-pip-version-check", str(wheels[0])],
+                  cwd=outside, env=environment, check=True,
+              )
+              subprocess.run([str(cli), "--help"], cwd=outside, env=environment, check=True)
+              example = outside / "example"
+              example.mkdir()
+              for name in ("generate.py", "oracle.py", "reproseed.toml"):
+                  shutil.copy2(repository / "examples" / "threshold" / name, example / name)
+              subprocess.run(
+                  [str(python), str(example / "generate.py")],
+                  cwd=outside, env=environment, check=True,
+              )
+              bundle = outside / "bundle"
+              subprocess.run(
+                  [str(cli), "reduce", "--config", str(example / "reproseed.toml"),
+                   "--out", str(bundle), "--allow-exec"],
+                  cwd=outside, env=environment, check=True,
+              )
+              subprocess.run(
+                  [str(cli), "inspect", str(bundle)],
+                  cwd=outside, env=environment, check=True,
+              )
+              relocated = outside / "relocated-bundle"
+              bundle.rename(relocated)
+              example.rename(outside / "example-unavailable")
+              before = hashlib.sha256((relocated / "fixture.sqlite3").read_bytes()).hexdigest()
+              subprocess.run(
+                  [str(cli), "replay", str(relocated), "--allow-exec"],
+                  cwd=outside, env=environment, check=True,
+              )
+              after = hashlib.sha256((relocated / "fixture.sqlite3").read_bytes()).hexdigest()
+              assert after == before
+          print("Installed wheel CLI reduced, inspected, and replayed outside the checkout.")
+          PY
