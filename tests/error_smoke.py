@@ -15,9 +15,12 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import time
 from contextlib import closing
 from pathlib import Path
 from typing import Any
+
+from windows_permissions import denied_directory_acl, probe_directory_creation
 
 PRIVATE = "PRIVATE_SYNTHETIC_VALUE_6be52"
 MARKER = "PRIVATE_SYNTHETIC_MARKER_6be52"
@@ -60,6 +63,50 @@ def hashes(root: Path) -> dict[str, str]:
     }
 
 
+def probe_input_read(python: Path, path: Path, cwd: Path, env: dict[str, str]) -> dict[str, Any]:
+    """Observe the installed interpreter's byte-read result without exposing data."""
+    program = """
+import errno, json, sys
+from pathlib import Path
+try:
+    with Path(sys.argv[1]).open('rb') as selected:
+        selected.read(1)
+except OSError as exc:
+    denied = (isinstance(exc, PermissionError) and exc.errno == errno.EACCES
+              and getattr(exc, 'winerror', None) in (None, 5))
+    print(json.dumps({'decision': 'denied' if denied else 'unexpected_error',
+                      'errno': exc.errno, 'winerror': getattr(exc, 'winerror', None),
+                      'permission_error': isinstance(exc, PermissionError)}))
+else:
+    print(json.dumps({'decision': 'allowed', 'errno': None, 'winerror': None}))
+"""
+    try:
+        result = subprocess.run(
+            [str(python), "-c", program, str(path)],
+            cwd=cwd,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=8,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("input capability probe timed out") from None
+    except OSError as exc:
+        raise RuntimeError(f"input capability probe failed (errno={exc.errno})") from None
+    if result.returncode != 0 or result.stderr:
+        raise RuntimeError(f"input capability probe failed (exit={result.returncode})")
+    value = json.loads(result.stdout)
+    if not isinstance(value, dict) or value.get("decision") not in {
+        "denied",
+        "allowed",
+        "unexpected_error",
+    }:
+        raise RuntimeError("invalid input capability probe result")
+    value["exit"] = result.returncode
+    return value
+
+
 class Audit:
     def __init__(self, python: Path, cli: Path, directory: Path) -> None:
         self.python = python
@@ -71,6 +118,7 @@ class Audit:
         self.env.update(PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
         self.records: list[dict[str, Any]] = []
         self.skips: list[dict[str, str]] = []
+        self.permission_observations: list[dict[str, Any]] = []
         self.cwd = self.root / "unrelated cwd Î© & spaces"
         self.cwd.mkdir()
 
@@ -472,73 +520,131 @@ class Audit:
             "python": sys.version,
             "records": self.records,
             "skips": self.skips,
+            "permission_observations": self.permission_observations,
         }
 
     def permission_cases(self) -> None:
         config, ledger = self.case("permissions")
         input_bytes_before = hashes(config.parent)
-        output_parent = self.root / "denied output"
-        output_parent.mkdir()
+        output_parent = config.parent if os.name == "nt" else self.root / "denied output"
+        if os.name != "nt":
+            output_parent.mkdir()
         if os.name == "nt":
-            identity = subprocess.run(
-                ["whoami"], capture_output=True, text=True, check=True, timeout=5
-            ).stdout.strip()
-            for name, path, permissions, arguments in (
-                (
-                    "unreadable_input",
-                    config,
-                    "(RD)",
-                    ["diagnose", "--config", str(config), "--allow-exec", "--format", "json"],
-                ),
-                (
-                    "unwritable_output",
-                    output_parent,
-                    "(WD,AD)",
-                    [
-                        "reduce",
-                        "--config",
-                        str(config),
-                        "--out",
-                        str(output_parent / "bundle"),
-                        "--allow-exec",
-                    ],
-                ),
-            ):
-                try:
-                    subprocess.run(
-                        ["icacls", str(path), "/deny", identity + ":" + permissions],
-                        check=True,
-                        capture_output=True,
-                        timeout=5,
+            # Explicitly target only this owned parent, restoring it before the
+            # second boundary. Inherited ACEs also affect its owned child files.
+            input_observation: dict[str, Any] = {"case": "unreadable_input"}
+            self.permission_observations.append(input_observation)
+            with denied_directory_acl(
+                config.parent, permissions="(OI)(CI)(RD)", propagate_children=True
+            ) as acl_observation:
+                input_observation["acl"] = acl_observation
+                input_probe = probe_input_read(self.python, config, self.cwd, self.env)
+                input_observation["probe"] = input_probe
+                if input_probe["decision"] == "unexpected_error":
+                    raise RuntimeError("unexpected input capability probe error")
+                if input_probe["decision"] == "allowed":
+                    self.skips.append(
+                        {
+                            "case": "unreadable_input",
+                            "reason": (
+                                "Input bytes remained readable after the owned directory ACL edit; "
+                                "real Windows input-denial integration was unavailable."
+                            ),
+                        }
                     )
-                    self.run(
-                        name,
-                        arguments,
+                    input_observation["cli_executed"] = False
+                else:
+                    started = time.monotonic()
+                    result = self.run(
+                        "unreadable_input",
+                        ["diagnose", "--config", str(config), "--allow-exec", "--format", "json"],
                         2,
                         recovery=(
-                            "Restore appropriate input read or output directory "
-                            "creation permissions; choose an accessible path."
+                            "Restore appropriate input read permissions; choose an accessible path."
                         ),
                     )
-                    assert self.launches(ledger) == 0
-                finally:
-                    already_failing = sys.exc_info()[0] is not None
-                    try:
-                        subprocess.run(
-                            ["icacls", str(path), "/remove:d", identity],
-                            check=True,
-                            capture_output=True,
-                            timeout=5,
-                        )
-                    except (OSError, subprocess.SubprocessError):
-                        if not already_failing:
-                            raise
-                        print(
-                            "error-smoke: ACL reset also failed; preserving the audit error",
-                            file=sys.stderr,
-                        )
-                assert hashes(config.parent) == input_bytes_before
+                    # Bytes cannot be checked until the inherited read deny has
+                    # been restored. Keep that evidence unknown if restoration
+                    # or the post-context hash check fails.
+                    self.records[-1]["watched_files_unchanged"] = None
+                    assert result is not None
+                    assert result["error"]["reason"] == "configuration_unavailable"
+                    assert result["actual_invocations"] == 0 and result["oracle_executed"] is False
+                    assert result["baseline_results"] == []
+                    input_observation.update(
+                        cli_executed=True,
+                        cli_exit=self.records[-1]["exit_code"],
+                        cli_elapsed_seconds=time.monotonic() - started,
+                    )
+                assert self.launches(ledger) == 0
+            assert hashes(config.parent) == input_bytes_before
+            input_observation.update(
+                actual_launches=self.launches(ledger),
+                input_files_unchanged=True,
+                child_readability_restored=True,
+            )
+            if input_observation["cli_executed"]:
+                self.records[-1]["watched_files_unchanged"] = True
                 self.records[-1]["watched_roots"] = [str(config.parent)]
+
+            output_observation: dict[str, Any] = {"case": "unwritable_output"}
+            self.permission_observations.append(output_observation)
+            with denied_directory_acl(output_parent) as acl_observation:
+                output_probe = probe_directory_creation(
+                    output_parent, python=str(self.python), cwd=self.cwd, env=self.env
+                )
+                output_observation["probe"] = output_probe
+                output_observation["acl"] = acl_observation
+                if output_probe["decision"] == "unexpected_error":
+                    raise RuntimeError("unexpected directory capability probe error")
+                if output_probe["decision"] == "allowed":
+                    self.skips.append(
+                        {
+                            "case": "unwritable_output",
+                            "reason": (
+                                "Child-directory creation was allowed after the owned ACL edit; "
+                                "real Windows output-denial integration was unavailable."
+                            ),
+                        }
+                    )
+                    output_observation["cli_executed"] = False
+                else:
+                    started = time.monotonic()
+                    self.run(
+                        "unwritable_output",
+                        [
+                            "reduce",
+                            "--config",
+                            str(config),
+                            "--out",
+                            str(output_parent / "bundle"),
+                            "--allow-exec",
+                        ],
+                        2,
+                        watch=(config.parent,),
+                        recovery=(
+                            "Restore output directory creation permissions; "
+                            "choose an accessible path."
+                        ),
+                    )
+                    output_observation.update(
+                        cli_executed=True,
+                        cli_exit=self.records[-1]["exit_code"],
+                        cli_elapsed_seconds=time.monotonic() - started,
+                    )
+                    assert "file_operation_failed" in self.records[-1]["stderr"]
+                    assert "permissions" in self.records[-1]["stderr"]
+                    assert self.records[-1]["stdout"] == ""
+                assert self.launches(ledger) == 0
+                assert hashes(config.parent) == input_bytes_before
+                assert not (output_parent / "bundle").exists()
+                assert not list(output_parent.glob(".reproseed-build-*"))
+                assert not list(output_parent.glob(".reproseed-probe-*"))
+            output_observation.update(
+                actual_launches=self.launches(ledger),
+                input_files_unchanged=hashes(config.parent) == input_bytes_before,
+                output_unpublished=not (output_parent / "bundle").exists(),
+            )
         else:
             for name, path, probe, arguments in (
                 (
@@ -671,7 +777,14 @@ def main() -> None:
     except BaseException:
         print(
             json.dumps(
-                {"completed": False, "records": [] if audit is None else audit.records},
+                {
+                    "completed": False,
+                    "records": [] if audit is None else audit.records,
+                    "skips": [] if audit is None else audit.skips,
+                    "permission_observations": []
+                    if audit is None
+                    else audit.permission_observations,
+                },
                 indent=2,
                 ensure_ascii=False,
             ),

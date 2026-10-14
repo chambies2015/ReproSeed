@@ -188,8 +188,36 @@ with executable tutorial assets; audit realistic mistakes, recovery, safe diagno
 package contents and bundle sharing. Preserve the six applications and alternate billing
 layout, historical INTEGER/TEXT/composite bundles and the existing hosted matrix.
 See [readiness gates](alpha-readiness.md) and [M2d completion evidence](m2d-completion.md).
-Hosted M2d validation requires Dan's subsequent review, commit and push. This milestone
-changes no version and publishes no package, release or tag.
+M2d was pushed as reviewed commit `6aaf7d77d51bb5e6277f16caa3a85e5e3e9574b6`.
+[Hosted run 38613024891](https://github.com/chambies2015/ReproSeed/actions/runs/38613024891)
+passed Ubuntu/Python 3.12 and Ubuntu/Python 3.14, but Windows/Python 3.12 failed the
+denied-output ACL regression in job `116020933305`. The ACL-edit command succeeded,
+but the test did not establish an effective directory-creation denial; the CLI
+created a verified bundle instead. This does not independently establish a product
+permission bypass, and the hosted gate was not accepted. The original M2d completion
+report preserves its local observations. This milestone changes no version and
+publishes no package, release or tag.
+
+## M2d.1 — effective-permission preconditions and staging-denial coverage
+
+Repair the Windows integration test to probe actual child-directory creation under
+its temporary, test-owned ACL before expecting product denial. A successful ACL
+edit or ACL readback is supplementary evidence, not proof of an effective denial.
+Run the real CLI denial assertions only when the bounded subprocess probe observes
+an appropriate permission error; record a narrowly scoped capability skip when
+creation remains allowed. Restore the original owned ACL on every exit path.
+
+Independently inject PermissionError at the production private staging-parent
+mkdir, retaining the real bundle/CLI path, and establish one attempted creation,
+curated exit 2, no oracle launches, no bundle, no overwrite and unchanged inputs.
+Keep real ACL integration separate from deterministic boundary coverage, along
+with collision and interruption regressions, finite stability results and the
+complete product/installed-wheel/compatibility checks. See
+[M2d.1 completion evidence](m2d1-completion.md) for the actual repair and validation.
+Changes remain unstaged and uncommitted for Dan; acceptance requires his subsequent
+review, commit and push, followed by success in all three unchanged hosted jobs.
+Public-alpha readiness remains **CONDITIONAL GO** pending successful hosted M2d.1
+CI, independent developer feedback and Dan's explicit distribution decision.
 
 ## Next — limited-alpha decision and outside-user feedback
 
