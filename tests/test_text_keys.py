@@ -367,9 +367,9 @@ UNSUPPORTED_SCHEMAS = [
         id="three-column-pk",
     ),
     pytest.param(
-        "CREATE TABLE private_items(id TEXT PRIMARY KEY) WITHOUT ROWID",
-        "unsupported_without_rowid",
-        id="without-rowid",
+        "CREATE TABLE private_items(id TEXT PRIMARY KEY COLLATE NOCASE) WITHOUT ROWID",
+        "unsupported_text_key_collation",
+        id="without-rowid-nocase",
     ),
     pytest.param("CREATE TABLE private_items(id TEXT)", "unsupported_primary_key", id="missing-pk"),
     pytest.param(

@@ -8,25 +8,26 @@ from contextlib import closing
 from pathlib import Path
 
 
-def generate(database: Path, *, small: bool = False) -> None:
+def generate(database: Path, *, small: bool = False, without_rowid: bool = False) -> None:
     """Create 1,308 user rows, or eight genuine rows for installed-wheel smoke."""
     if database.exists():
         raise FileExistsError(f"Refusing to overwrite an existing database: {database}")
     database.parent.mkdir(parents=True, exist_ok=True)
     with closing(sqlite3.connect(database)) as connection, connection:
         connection.execute("PRAGMA foreign_keys = ON")
+        storage = " WITHOUT ROWID" if without_rowid else ""
         connection.executescript(
-            """
+            f"""
             CREATE TABLE tenants (
                 id TEXT PRIMARY KEY NOT NULL,
                 name TEXT NOT NULL
-            );
+            ){storage};
             CREATE TABLE accounts (
                 tenant_id TEXT NOT NULL REFERENCES tenants(id),
                 account_code TEXT NOT NULL,
                 name TEXT NOT NULL,
                 PRIMARY KEY (tenant_id, account_code)
-            );
+            ){storage};
             CREATE TABLE invoices (
                 tenant_id TEXT NOT NULL,
                 invoice_no INTEGER NOT NULL,
@@ -35,7 +36,7 @@ def generate(database: Path, *, small: bool = False) -> None:
                 PRIMARY KEY (tenant_id, invoice_no),
                 FOREIGN KEY (tenant_id, account_code)
                     REFERENCES accounts(tenant_id, account_code)
-            );
+            ){storage};
             CREATE TABLE invoice_lines (
                 id TEXT PRIMARY KEY,
                 tenant_id TEXT,
@@ -43,7 +44,7 @@ def generate(database: Path, *, small: bool = False) -> None:
                 description TEXT NOT NULL,
                 amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
                 FOREIGN KEY (tenant_id, invoice_no) REFERENCES invoices
-            );
+            ){storage};
             CREATE TABLE payments (
                 id INTEGER PRIMARY KEY,
                 tenant_id TEXT,
@@ -62,7 +63,7 @@ def generate(database: Path, *, small: bool = False) -> None:
                 PRIMARY KEY (tenant_id, reference),
                 FOREIGN KEY (tenant_id, account_code)
                     REFERENCES accounts(tenant_id, account_code)
-            );
+            ){storage};
             CREATE INDEX invoices_account ON invoices(tenant_id, account_code);
             CREATE INDEX lines_invoice ON invoice_lines(tenant_id, invoice_no);
             CREATE INDEX payments_invoice ON payments(tenant_id, invoice_no);
@@ -134,8 +135,13 @@ def main() -> None:
     parser.add_argument(
         "--small", action="store_true", help="Eight-row installed-wheel smoke fixture."
     )
+    parser.add_argument(
+        "--without-rowid",
+        action="store_true",
+        help="Store declared TEXT/composite keys WITHOUT ROWID; payments keep rowid storage.",
+    )
     arguments = parser.parse_args()
-    generate(arguments.database, small=arguments.small)
+    generate(arguments.database, small=arguments.small, without_rowid=arguments.without_rowid)
     rows = 8 if arguments.small else 1308
     print(f"Created {arguments.database}: {rows} synthetic user rows across six tables.")
 

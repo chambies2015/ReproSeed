@@ -155,6 +155,7 @@ class _Table:
     primary_keys: tuple[str, ...]
     key_families: tuple[KeyFamily, ...]
     column_types: dict[str, str]
+    without_rowid: bool
 
 
 @dataclass(frozen=True)
@@ -263,8 +264,6 @@ def _read_tables(connection: sqlite3.Connection) -> tuple[_Table, ...]:
             continue
         if kind != "table":
             raise DatabaseError(f"Unsupported schema: {kind} table {name!r}")
-        if without_rowid:
-            raise DatabaseError(f"Unsupported schema: WITHOUT ROWID table {name!r}")
         columns = connection.execute(f"PRAGMA main.table_xinfo({_quote(name)})").fetchall()
         if any(column[6] != 0 for column in columns):
             raise DatabaseError(f"Unsupported schema: generated or hidden columns in {name!r}")
@@ -283,7 +282,7 @@ def _read_tables(connection: sqlite3.Connection) -> tuple[_Table, ...]:
         # INTEGER PRIMARY KEY DESC is not a rowid alias and can contain NULL/noninteger keys.
         indexes = connection.execute(f"PRAGMA main.index_list({_quote(name)})").fetchall()
         primary_indexes = [index for index in indexes if index[3] == "pk"]
-        if len(primary) == 1 and families == ("INTEGER",) and primary_indexes:
+        if not without_rowid and len(primary) == 1 and families == ("INTEGER",) and primary_indexes:
             raise DatabaseError(
                 f"Unsupported schema: non-rowid-alias INTEGER primary key in {name!r}"
             )
@@ -315,6 +314,35 @@ def _read_tables(connection: sqlite3.Connection) -> tuple[_Table, ...]:
                         raise DatabaseError(
                             "Unsupported schema: composite key collation must be BINARY"
                         ) from exc
+        elif without_rowid:
+            # Even INTEGER PRIMARY KEY is an indexed declared key here, never a
+            # rowid alias. index_xinfo also lists auxiliary stored data columns;
+            # only entries marked as key columns establish the PK shape.
+            if primary[0][5] != 1 or len(primary_indexes) != 1:
+                raise DatabaseError("Unsupported schema: WITHOUT ROWID primary-key index metadata")
+            index = primary_indexes[0]
+            if index[2] != 1 or index[4] != 0:
+                raise DatabaseError("Unsupported schema: WITHOUT ROWID primary-key index metadata")
+            keys = [
+                entry
+                for entry in connection.execute(f"PRAGMA main.index_xinfo({_quote(index[1])})")
+                if entry[5] == 1
+            ]
+            if (
+                len(keys) != 1
+                or keys[0][0] != 0
+                or keys[0][1] != primary[0][0]
+                or keys[0][2] != primary[0][1]
+            ):
+                raise DatabaseError("Unsupported schema: WITHOUT ROWID primary-key index metadata")
+            if keys[0][3] != 0:
+                raise DatabaseError("Unsupported schema: descending primary-key order")
+            if not isinstance(keys[0][4], str) or keys[0][4].upper() != "BINARY":
+                raise DatabaseError(
+                    "Unsupported schema: WITHOUT ROWID key collation must be BINARY"
+                )
+            if families == ("TEXT",):
+                _binary_column_collation(connection, name, primary[0][1])
         elif families == ("TEXT",):
             if len(primary_indexes) != 1:
                 raise DatabaseError("Unsupported schema: TEXT primary-key index metadata")
@@ -324,7 +352,11 @@ def _read_tables(connection: sqlite3.Connection) -> tuple[_Table, ...]:
             _binary_key_index(connection, index[1], primary[0][0], primary[0][1])
             _binary_column_collation(connection, name, primary[0][1])
         types = {column[1]: column[2] for column in columns}
-        tables.append(_Table(name, tuple(column[1] for column in primary), families, types))
+        tables.append(
+            _Table(
+                name, tuple(column[1] for column in primary), families, types, bool(without_rowid)
+            )
+        )
     return tuple(tables)
 
 

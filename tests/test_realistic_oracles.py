@@ -15,10 +15,11 @@ import pytest
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 EXAMPLES = (
-    ("reservation_overbook", 44, "REPROSEED_RESERVATION_OVERBOOK"),
-    ("approval_cycle", 45, "REPROSEED_APPROVAL_CYCLE"),
-    ("text_key_entitlements", 46, "REPROSEED_TEXT_KEY_ENTITLEMENTS"),
-    ("composite_billing", 47, "REPROSEED_COMPOSITE_BILLING_FALSE_PAID"),
+    ("reservation_overbook", 44, "REPROSEED_RESERVATION_OVERBOOK", False),
+    ("approval_cycle", 45, "REPROSEED_APPROVAL_CYCLE", False),
+    ("text_key_entitlements", 46, "REPROSEED_TEXT_KEY_ENTITLEMENTS", False),
+    ("composite_billing", 47, "REPROSEED_COMPOSITE_BILLING_FALSE_PAID", False),
+    ("composite_billing", 47, "REPROSEED_COMPOSITE_BILLING_FALSE_PAID", True),
 )
 
 
@@ -40,12 +41,15 @@ def _run(argv: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _prepare(example: str, directory: Path) -> Path:
+def _prepare(example: str, directory: Path, *, without_rowid: bool = False) -> Path:
     directory.mkdir()
     for name in ("app.py", "oracle.py", "generate.py"):
         shutil.copy2(REPOSITORY / "examples" / example / name, directory / name)
     database = directory / "fixture.sqlite3"
-    result = _run([sys.executable, str(directory / "generate.py"), str(database)], directory.parent)
+    flags = ["--without-rowid"] if without_rowid else []
+    result = _run(
+        [sys.executable, str(directory / "generate.py"), str(database), *flags], directory.parent
+    )
     assert result.returncode == 0, result.stdout + result.stderr
     return database
 
@@ -59,11 +63,11 @@ def _oracle(database: Path) -> subprocess.CompletedProcess[str]:
     return result
 
 
-@pytest.mark.parametrize(("example", "expected_exit", "marker"), EXAMPLES)
+@pytest.mark.parametrize(("example", "expected_exit", "marker", "without_rowid"), EXAMPLES)
 def test_realistic_oracle_target_and_correct_data(
-    tmp_path: Path, example: str, expected_exit: int, marker: str
+    tmp_path: Path, example: str, expected_exit: int, marker: str, without_rowid: bool
 ) -> None:
-    database = _prepare(example, tmp_path / "application")
+    database = _prepare(example, tmp_path / "application", without_rowid=without_rowid)
     target = _oracle(database)
     assert target.returncode == expected_exit, target.stdout + target.stderr
     assert target.stdout.splitlines() == [marker]
@@ -71,13 +75,14 @@ def test_realistic_oracle_target_and_correct_data(
 
     # Independently regenerate the bytes and prove existing outputs are protected.
     duplicate = tmp_path / "second.sqlite3"
+    flags = ["--without-rowid"] if without_rowid else []
     generated = _run(
-        [sys.executable, str(database.parent / "generate.py"), str(duplicate)], tmp_path
+        [sys.executable, str(database.parent / "generate.py"), str(duplicate), *flags], tmp_path
     )
     assert generated.returncode == 0, generated.stdout + generated.stderr
     assert database.read_bytes() == duplicate.read_bytes()
     protected = _run(
-        [sys.executable, str(database.parent / "generate.py"), str(duplicate)], tmp_path
+        [sys.executable, str(database.parent / "generate.py"), str(duplicate), *flags], tmp_path
     )
     assert protected.returncode != 0
     assert database.read_bytes() == duplicate.read_bytes()
@@ -105,11 +110,11 @@ def test_realistic_oracle_target_and_correct_data(
     assert not correct.stderr
 
 
-@pytest.mark.parametrize(("example", "expected_exit", "marker"), EXAMPLES)
+@pytest.mark.parametrize(("example", "expected_exit", "marker", "without_rowid"), EXAMPLES)
 def test_realistic_oracle_stops_reproducing_when_application_bug_is_fixed(
-    tmp_path: Path, example: str, expected_exit: int, marker: str
+    tmp_path: Path, example: str, expected_exit: int, marker: str, without_rowid: bool
 ) -> None:
-    database = _prepare(example, tmp_path / "application")
+    database = _prepare(example, tmp_path / "application", without_rowid=without_rowid)
     original = _oracle(database)
     assert original.returncode == expected_exit
     assert original.stdout.splitlines() == [marker]
@@ -227,11 +232,11 @@ def test_text_entitlement_unrelated_missing_grants_do_not_emit_target(tmp_path: 
     assert "Unexpected entitlement processing discrepancy" in unrelated.stderr
 
 
-@pytest.mark.parametrize(("example", "expected_exit", "marker"), EXAMPLES)
+@pytest.mark.parametrize(("example", "expected_exit", "marker", "without_rowid"), EXAMPLES)
 def test_realistic_application_crash_does_not_emit_target(
-    tmp_path: Path, example: str, expected_exit: int, marker: str
+    tmp_path: Path, example: str, expected_exit: int, marker: str, without_rowid: bool
 ) -> None:
-    database = _prepare(example, tmp_path / "application")
+    database = _prepare(example, tmp_path / "application", without_rowid=without_rowid)
     function = {
         "reservation_overbook": "process_reservations",
         "approval_cycle": "validate_workflows",
@@ -248,8 +253,11 @@ def test_realistic_application_crash_does_not_emit_target(
     assert "Unrelated synthetic crash" in crash.stderr
 
 
-def test_composite_billing_unrelated_decisions_do_not_emit_target(tmp_path: Path) -> None:
-    database = _prepare("composite_billing", tmp_path / "application")
+@pytest.mark.parametrize("without_rowid", [False, True])
+def test_composite_billing_unrelated_decisions_do_not_emit_target(
+    tmp_path: Path, without_rowid: bool
+) -> None:
+    database = _prepare("composite_billing", tmp_path / "application", without_rowid=without_rowid)
     application = database.parent / "app.py"
     source = application.read_text(encoding="utf-8")
     broken = source.replace(
@@ -264,8 +272,11 @@ def test_composite_billing_unrelated_decisions_do_not_emit_target(tmp_path: Path
     assert "Unexpected invoice reconciliation discrepancy" in unrelated.stderr
 
 
-def test_composite_billing_pending_refund_is_not_settled_money(tmp_path: Path) -> None:
-    database = _prepare("composite_billing", tmp_path / "application")
+@pytest.mark.parametrize("without_rowid", [False, True])
+def test_composite_billing_pending_refund_is_not_settled_money(
+    tmp_path: Path, without_rowid: bool
+) -> None:
+    database = _prepare("composite_billing", tmp_path / "application", without_rowid=without_rowid)
     with closing(sqlite3.connect(database)) as connection, connection:
         connection.execute(
             "UPDATE refunds SET state = 'pending' "
@@ -278,8 +289,11 @@ def test_composite_billing_pending_refund_is_not_settled_money(tmp_path: Path) -
     assert not correct.stderr
 
 
-def test_composite_billing_malformed_decision_map_is_not_target(tmp_path: Path) -> None:
-    database = _prepare("composite_billing", tmp_path / "application")
+@pytest.mark.parametrize("without_rowid", [False, True])
+def test_composite_billing_malformed_decision_map_is_not_target(
+    tmp_path: Path, without_rowid: bool
+) -> None:
+    database = _prepare("composite_billing", tmp_path / "application", without_rowid=without_rowid)
     application = database.parent / "app.py"
     source = application.read_text(encoding="utf-8")
     broken = source.replace("    return decisions", "    return {}")
@@ -291,14 +305,19 @@ def test_composite_billing_malformed_decision_map_is_not_target(tmp_path: Path) 
     assert "Unexpected invoice decision map" in unrelated.stderr
 
 
-def test_composite_billing_small_fixture_has_real_refund_accounting(tmp_path: Path) -> None:
+@pytest.mark.parametrize("without_rowid", [False, True])
+def test_composite_billing_small_fixture_has_real_refund_accounting(
+    tmp_path: Path, without_rowid: bool
+) -> None:
     application = tmp_path / "application"
     application.mkdir()
     for name in ("app.py", "oracle.py", "generate.py"):
         shutil.copy2(REPOSITORY / "examples" / "composite_billing" / name, application / name)
     database = application / "fixture.sqlite3"
+    flags = ["--without-rowid"] if without_rowid else []
     generated = _run(
-        [sys.executable, str(application / "generate.py"), str(database), "--small"], tmp_path
+        [sys.executable, str(application / "generate.py"), str(database), "--small", *flags],
+        tmp_path,
     )
     assert generated.returncode == 0, generated.stdout + generated.stderr
     with closing(sqlite3.connect(database)) as connection:
@@ -316,6 +335,11 @@ def test_composite_billing_small_fixture_has_real_refund_accounting(tmp_path: Pa
             "refunds": 1,
         }
         assert sum(counts.values()) == 8
+        assert {
+            row[1]: bool(row[4])
+            for row in connection.execute("PRAGMA table_list")
+            if row[0] == "main" and row[1] in tables
+        } == {table: without_rowid and table != "payments" for table in tables}
         assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
         total = connection.execute("SELECT total_cents FROM invoices").fetchone()[0]
@@ -330,3 +354,42 @@ def test_composite_billing_small_fixture_has_real_refund_accounting(tmp_path: Pa
     assert target.returncode == 47, target.stdout + target.stderr
     assert target.stdout.splitlines() == ["REPROSEED_COMPOSITE_BILLING_FALSE_PAID"]
     assert not target.stderr
+
+
+def test_composite_billing_storage_variant_preserves_declared_data_and_indexes(
+    tmp_path: Path,
+) -> None:
+    ordinary = _prepare("composite_billing", tmp_path / "application")
+    alternate = tmp_path / "without-rowid.sqlite3"
+    generated = _run(
+        [sys.executable, str(ordinary.parent / "generate.py"), str(alternate), "--without-rowid"],
+        tmp_path,
+    )
+    assert generated.returncode == 0, generated.stdout + generated.stderr
+    with (
+        closing(sqlite3.connect(ordinary)) as rowid_connection,
+        closing(sqlite3.connect(alternate)) as without_rowid_connection,
+    ):
+        schema_query = (
+            "SELECT type, name, tbl_name, sql FROM sqlite_schema "
+            "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name"
+        )
+        ordinary_schema = rowid_connection.execute(schema_query).fetchall()
+        alternate_schema = without_rowid_connection.execute(schema_query).fetchall()
+        assert [
+            (kind, name, table, sql.replace(" WITHOUT ROWID", ""))
+            for kind, name, table, sql in alternate_schema
+        ] == ordinary_schema
+        tables = [name for kind, name, _table, _sql in ordinary_schema if kind == "table"]
+        assert len(tables) == 6
+        for table in tables:
+            query = f'SELECT * FROM "{table}"'
+            assert set(without_rowid_connection.execute(query)) == set(
+                rowid_connection.execute(query)
+            )
+        for metadata in ("user_version", "application_id"):
+            assert without_rowid_connection.execute(f"PRAGMA {metadata}").fetchone() == (
+                rowid_connection.execute(f"PRAGMA {metadata}").fetchone()
+            )
+        assert without_rowid_connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        assert without_rowid_connection.execute("PRAGMA foreign_key_check").fetchall() == []

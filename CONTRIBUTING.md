@@ -11,10 +11,12 @@ uv run mypy
 uv run mypy --platform linux
 uv run --locked python -c "from pathlib import Path; Path('.validation').mkdir(exist_ok=True)"
 uv run pytest --basetemp=.validation/pytest
-uv run pytest tests/test_composite_keys.py tests/test_text_keys.py tests/test_diagnose_cli.py tests/test_diagnostics.py tests/test_realistic_acceptance.py --basetemp=.validation/pytest-focused
-uv run --locked python tests/milestone_smoke.py --directory .validation/m2b-measurements-fresh
+uv run pytest tests/test_without_rowid.py tests/test_composite_keys.py tests/test_text_keys.py tests/test_diagnose_cli.py tests/test_diagnostics.py tests/test_realistic_acceptance.py --basetemp=.validation/pytest-focused
+uv run --locked python tests/milestone_smoke.py --directory .validation/m2c-measurements-fresh
+uv run --locked python tests/milestone_smoke.py --directory .validation/m2c-without-rowid-measurements-fresh --examples composite_billing --without-rowid-billing-fixture
 uv run --locked python tests/compatibility_smoke.py --directory .validation/pre-m1b-v1-fresh
 uv run --locked python tests/compatibility_smoke.py --directory .validation/m2a-text-v1-fresh --history m2a-text
+uv run --locked python tests/compatibility_smoke.py --directory .validation/m2b-composite-v1-fresh --history m2b-composite
 uv build --no-sources
 ```
 
@@ -38,6 +40,9 @@ scratch directory under `.validation`; it generates a genuine version-1 bundle f
 reviewed pre-M1b source before checking the current reader and replay.
 The separate `--history m2a-text` mode archives accepted M2a.1 source at
 `d60c79c07ae12666af9572ced69edc3b9523ce17` and generates a genuine prior TEXT-key bundle.
+`--history m2b-composite` separately archives accepted M2b source at
+`d70edac43c22efe3df643b821af1c51ec756a945` and uses its genuine small billing generator
+and reducer to produce a prior composite-key bundle. No report is hand-constructed.
 Each generation records source commit/archive hash and original source/bundle hashes.
 Use `--phase generate` before reader changes and `--phase validate` afterward when useful;
 never regenerate or modify historical bundles/reports to match the new reader.
@@ -51,15 +56,17 @@ source/bundle hash equality. It checks retained values/schema/metadata and repla
 bundles after original example paths are made unavailable. Large reductions belong in the
 acceptance suite and explicit measurement recipe, not repeated in small formatting tests.
 
-M2b validation also requires `tests/test_composite_keys.py`, `tests/test_text_keys.py`,
-the five established application reductions and `examples/composite_billing/`.
-The full billing fixture has 1,308 user rows; retain a finite invocation budget and
+M2c validation also requires `tests/test_without_rowid.py`, `tests/test_composite_keys.py`,
+`tests/test_text_keys.py`, all six established application reductions and the explicit
+WITHOUT ROWID variant of `examples/composite_billing/`.
+The full billing fixture has 1,308 user rows in either layout; retain a finite invocation budget and
 investigate failure to reach at most 16 rows without weakening correctness or changing
 the generic search heuristic. Exercise static and executable
 diagnosis, reduction, default/explicit JSON and text inspection, and three-confirmation
 relocated replay with the installed wheel outside the checkout. Retain source/assets/bundle
 hash equality and declared-value/schema checks; do not assert hidden-rowid equality after
-TEXT/composite-key compaction. Record scalar/composite example counts, per-table counts, actual invocations
+ordinary TEXT/composite-key compaction. WITHOUT ROWID has no hidden rowid; retain its exact
+declared key values and storage declaration. Record scalar/composite example counts, per-table counts, actual invocations
 and finite budget, cache hits, acceptances, invalid/unresolved trials, runtime and fixture sizes.
 Keep large measurement runs explicit rather than multiplying them across small smoke tests.
 Installed-wheel CI reuses the full lifecycle with `--examples composite_billing
@@ -67,6 +74,12 @@ Installed-wheel CI reuses the full lifecycle with `--examples composite_billing
 `--examples text_key_entitlements --small-text-fixture` smoke. These retain real application
 decisions, static/executable diagnosis, default/explicit JSON and text inspection, and
 three fresh relocated replay confirmations. Runtime imports must come from the wheel.
+The separate `--examples composite_billing --small-composite-fixture
+--without-rowid-billing-fixture` wheel smoke adds the same eight-row application in its
+mixed storage layout. Full alternate-layout measurements use
+`--examples composite_billing --without-rowid-billing-fixture` in a separate fresh directory;
+do not repeat another full 1,308-row reduction in every hosted job. Compare layout outcomes
+and measure scalar sort costs before proposing any ordering refactor.
 
 For rejection fixtures, prove diagnosis and reduction never launch the oracle, publish no
 verified bundle and preserve source hashes. Cover exact TEXT/BINARY keys, nullable-schema
@@ -77,6 +90,13 @@ targets, partial NULL child tuples, cross-tenant tuple identity and multi-level 
 Reject nullable parent components, wrong storage, descending components, malformed PK
 index metadata, alternate/reordered targets and FK cardinality mismatches even when empty.
 Ordinary integer ordering and cancellation/accounting regressions must continue to pass.
+WITHOUT ROWID regressions exercise all six supported scalar/composite shapes, auxiliary
+index_xinfo columns, ascending PK metadata, secondary indexes, both mixed-layout FK
+directions, independent FK groups, partial NULL tuples, cycles and multilevel closures.
+Compare dependencies with direct SQLite queries and verify retained values/schema/indexes,
+integrity, foreign keys and unchanged source hashes through materialization and compaction.
+Use real SQLite-created unsupported schemas for adapter rejection; separately assert SQLite
+rejects missing PKs, AUTOINCREMENT and NULL PK inserts without fabricating impossible states.
 
 Use a clean copy prepared with CI's explicit `.validation` parent; run full tests, builds
 and the installed-wheel workflow without editable imports. Inspect wheel/sdist contents
@@ -116,11 +136,16 @@ Keep source acquisition, candidate state and oracle state separate. Preserve val
 schema. Add meaningful regression cases for contracts changed by a patch. Do not weaken
 acceptance assertions or silently skip failures. Read AGENTS.md before implementation and
 SECURITY.md before executing external oracle code. Publishing and later roadmap milestones
-are outside M2b. Leave milestone work unstaged and uncommitted for Dan's review; do not
+are outside M2c. Leave milestone work unstaged and uncommitted for Dan's review; do not
 push, open a PR, tag, release or publish packages. M1b.2's accepted hosted evidence is
 commit `c9cf32ced7f0428385d1daad912d5aa01fec6967`, run `38476866662`, all three jobs
 successful. M2a.1 was accepted at commit `d60c79c07ae12666af9572ced69edc3b9523ce17` in
 [hosted run 38572680512](https://github.com/chambies2015/ReproSeed/actions/runs/38572680512),
-also with all three jobs successful. Historical completion reports stay unchanged;
-M2b hosted acceptance remains pending Dan's subsequent commit/push. Do not implement M2c
-or PostgreSQL in this change, and do not call the prototype production-ready.
+also with all three jobs successful. M2b was accepted at commit
+`d70edac43c22efe3df643b821af1c51ec756a945` in
+[hosted run 38592071692](https://github.com/chambies2015/ReproSeed/actions/runs/38592071692),
+with Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12 successful.
+Historical completion reports stay unchanged; hosted M2c acceptance remains pending Dan's
+subsequent commit/push. Propose a separate public-alpha readiness and usability review after
+this milestone. Do not implement PostgreSQL, LLM integration or web UI, publish packages,
+or call the prototype production-ready.

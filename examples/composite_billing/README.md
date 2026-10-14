@@ -21,9 +21,18 @@ The default generator creates 1,308 user rows deterministically:
 Accounts and invoices repeat their second key components under different tenants.
 Invoice numbers are sparse integers. All primary-key components are non-NULL and
 use exact declared INTEGER or TEXT types. TEXT comparisons use SQLite's default
-BINARY collation. These are ordinary rowid tables; the application uses declared
+BINARY collation. The default uses ordinary rowid tables; the application uses declared
 keys throughout and never uses hidden rowids. The invoice-line TEXT key omits a
 NOT NULL declaration but every stored key is actual non-NULL TEXT.
+
+The explicit `generate.py --without-rowid /new/path/fixture.sqlite3` variant keeps the
+same deterministic data and accounting defect. Tenants, accounts, invoices, invoice lines
+and refunds use WITHOUT ROWID; payments retain their ordinary INTEGER rowid PK. The
+payment-to-invoice and refund-to-payment references therefore cross storage layouts in
+both directions. Existing default generation is preserved. WITHOUT ROWID enforces non-NULL
+PK components and uses declared PK storage identity; it supplies no hidden rowid. Its
+INTEGER PRIMARY KEY is not a rowid alias. ReproSeed deliberately accepts only the bounded
+ascending INTEGER/TEXT shapes described in [the architecture](../../docs/architecture.md#supported-schema).
 
 The scalar-keyed lines and payments reference both invoice components as one
 foreign key. Payment decoys include fully populated references, `(NULL, number)`,
@@ -83,6 +92,7 @@ after reduction, inspection and replay:
 
 ```console
 uv run --locked python tests/milestone_smoke.py --directory .validation/composite-billing-measurements-fresh --examples composite_billing
+uv run --locked python tests/milestone_smoke.py --directory .validation/without-rowid-billing-measurements-fresh --examples composite_billing --without-rowid-billing-fixture
 ```
 
 The M2b Windows/Python 3.12.15, SQLite 3.53.1 source-validation measurement
@@ -98,12 +108,24 @@ and bundle hashes were preserved. See
 [the milestone completion evidence](../../docs/m2b-completion.md) for the
 recorded commands and broader validation.
 
+M2b's accepted hosted gate is commit `d70edac43c22efe3df643b821af1c51ec756a945`,
+[run 38592071692](https://github.com/chambies2015/ReproSeed/actions/runs/38592071692),
+with Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12 all passed.
+M2c's current rowid/alternate-layout measurements and actual platform checks are recorded
+separately in [M2c completion evidence](../../docs/m2c-completion.md); past counts and timing
+are observations, not constants imposed on the reducer.
+
 `generate.py --small /new/path/fixture.sqlite3` creates eight genuine rows with
 the same schema and accounting defect: one tenant, account and invoice; three
 invoice lines; one settled payment; and one completed refund. Installed-wheel
 CI uses this fixture for the complete diagnosis, reduction, default/explicit
 JSON and text inspection, and relocated replay lifecycle. The default large
 fixture remains the full acceptance and measurement scenario.
+`generate.py --small --without-rowid /new/path/fixture.sqlite3` creates the same genuine
+eight-row defect with mixed storage layouts. Installed-wheel smoke uses
+`--examples composite_billing --small-composite-fixture --without-rowid-billing-fixture`;
+the full variant remains a separate acceptance run with the same finite 260-invocation
+budget. Source paths must be fresh in both modes.
 
 Copy the complete bundle outside the checkout and use the installed CLI from an
 unrelated working directory:
@@ -114,7 +136,9 @@ reproseed replay /path/to/relocated-billing-bundle --allow-exec
 ```
 
 The bundle carries the application and oracle; originals are unnecessary.
-Compact export may change hidden rowids while preserving declared keys and
-values, so the compact fixture is reconfirmed. Reduction is not anonymization.
+Compact export may change hidden rowids in ordinary nonalias tables while preserving
+declared keys and values. WITHOUT ROWID tables have no hidden rowids, and their original
+storage declarations remain in the compact fixture. Both modes require reconfirmation.
+Reduction is not anonymization.
 Review code and retained data before sharing. Disposable execution is not an
 operating-system sandbox.

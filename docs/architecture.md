@@ -1,4 +1,4 @@
-# M2b architecture
+# M2c architecture
 
 The contract is: smaller fixture, same specified failure, independently replayable evidence.
 "Same" is the configured exit/marker contract. ReproSeed does not infer semantic equivalence
@@ -39,22 +39,22 @@ normal WAL shared-memory sidecar. An arbitrary oracle is not constrained by this
 ## Supported schema
 
 SQLite >=3.37 is required for table_list metadata. Supported user tables are ordinary or
-STRICT rowid tables with one of these declared primary-key shapes:
+STRICT rowid or WITHOUT ROWID tables with these bounded declared primary-key shapes:
 
 | Family | Declaration and metadata | Actual stored values |
 | --- | --- | --- |
-| INTEGER | Exact declared INTEGER; aliases rowid, established by absence of a separate PK index | Integers; negative, sparse and zero keys supported |
+| INTEGER | Exact declared INTEGER; ordinary rowid tables require a rowid alias, established by absence of a separate PK index; WITHOUT ROWID requires a declared ascending PK index | Non-NULL SQLite integers; negative, sparse and zero keys supported |
 | TEXT | Exact declared TEXT; single-column PK index established by index_list/index_xinfo, with BINARY comparison | Non-NULL SQLite TEXT that decodes correctly to Python strings |
 | Two-column composite | Exactly two ascending PK components, each exact declared INTEGER or TEXT; a unique nonpartial declared PK index matches their order and BINARY comparisons | Every INTEGER component is non-NULL SQLite integer; every TEXT component is non-NULL SQLite text that decodes safely |
 
 Type-name case and surrounding whitespace are ignored; VARCHAR/CHAR and other text-affinity
-spellings are outside M2b. INTEGER+INTEGER, INTEGER+TEXT, TEXT+INTEGER and TEXT+TEXT
+spellings are outside M2c. INTEGER+INTEGER, INTEGER+TEXT, TEXT+INTEGER and TEXT+TEXT
 composite shapes are supported. Inline and table-level single-column TEXT PKs are supported, with
 or without explicit NOT NULL. An ordinary non-STRICT SQLite PK can permit NULL; this schema
 is accepted only when every snapshot PK component is non-NULL and has the required storage.
 This stricter identity policy applies even though SQLite may allow NULL in ordinary
 composite PKs. STRICT tables are supported,
-as is AUTOINCREMENT on an INTEGER rowid alias. Empty tables, empty strings, Unicode,
+as is AUTOINCREMENT on an ordinary INTEGER rowid alias. Empty tables, empty strings, Unicode,
 SQL quotes, embedded NULs and case-sensitive distinct text keys are supported. Identifiers
 are quoted, including embedded quotes. See SQLite's [CREATE TABLE rules](https://www.sqlite.org/lang_createtable.html).
 
@@ -65,15 +65,34 @@ An empty isolated in-memory schema probe derives the column's default collation 
 a plain index, since a table-level PK can override the column collation. Both must be BINARY;
 the adapter delegates this to SQLite instead of parsing CREATE TABLE with regular expressions.
 Composite metadata follows table_xinfo PK ordinals, locates the declared PK through
-index_list, and checks ordered key entries from index_xinfo. Auxiliary rowid entries are
-not PK components. Unique/nonpartial origin, column identity, component count, ascending
+index_list, and checks ordered key entries from index_xinfo. Entries whose key flag is zero
+are auxiliary storage columns, not PK components; this includes ordinary rowid entries and
+WITHOUT ROWID nonkey data columns. Unique/nonpartial origin, column identity, component count, ascending
 order and comparison collations are checked even for empty tables. INTEGER composite
-components are not rowid aliases; scalar INTEGER retains its separate alias requirement.
-NOCASE, RTRIM, custom collations, descending composite components and unsupported PK index
+components are not rowid aliases; scalar INTEGER in an ordinary rowid table retains its
+separate alias requirement. Every WITHOUT ROWID scalar/composite PK component must be
+ascending; ordinary scalar TEXT handling retains its existing comparison policy.
+NOCASE, RTRIM, custom collations, descending composite or WITHOUT ROWID components and unsupported PK index
 metadata are rejected explicitly.
 This restriction makes exact text dependency identities agree with the supported BINARY
 comparison semantics; it does not approximate arbitrary SQLite comparisons. SQLite describes
 its [storage classes, affinity and collations](https://www.sqlite.org/datatype3.html).
+
+`PRAGMA table_list` supplies each table's WITHOUT ROWID storage flag. This metadata is
+part of the table model; it does not change `(table, key)` equality, sort order or candidate
+cache identities. A WITHOUT ROWID scalar INTEGER PK must have a unique nonpartial declared
+PK index, unlike the ordinary rowid alias. Its PK components still come from table_xinfo
+ordinals, and only index_xinfo key entries determine identity. Empty tables undergo the
+same checks. See [SQLite table metadata](https://www.sqlite.org/pragma.html#pragma_table_list).
+
+WITHOUT ROWID has no hidden rowid, and INTEGER PRIMARY KEY has integer affinity without
+rowid-alias behavior. SQLite requires a declared PK and enforces NOT NULL on every
+component; missing PKs, AUTOINCREMENT and NULL PK inserts fail in SQLite itself. Inserts
+do not update last_insert_rowid(), rowid-based incremental BLOB I/O cannot open these rows,
+and sqlite3_update_hook does not report their changes. ReproSeed relies on declared values
+and metadata throughout. These engine restrictions are distinct from ReproSeed rejecting
+SQLite-created schemas outside the bounded supported shapes. See
+[SQLite's WITHOUT ROWID differences](https://www.sqlite.org/withoutrowid.html#differences_from_ordinary_rowid_tables).
 
 Foreign keys must reference the complete supported parent's declared PK, explicitly in
 the parent's PK order or implicitly by omitting the target column list. foreign_key_list
@@ -84,13 +103,16 @@ INTEGER parents require integer-affinity child columns (declared type contains I
 actual integer or NULL values; TEXT parents require exact declared TEXT child columns and
 actual TEXT or NULL values that decode correctly. Scalar-keyed children may reference
 composite parents, and composite-keyed children may reference scalar or composite parents.
-Multiple scalar/composite FKs, self-references, mixed-family chains and cycles are supported.
+Multiple scalar/composite FKs, self-references, mixed-family chains and cycles are supported,
+including either FK direction between rowid and WITHOUT ROWID tables.
 If any child FK component is NULL, SQLite requires no parent; ReproSeed creates no edge for
-that group. This includes both fully NULL and partially NULL tuples. Otherwise the complete
+that group. This includes both fully NULL and partially NULL tuples. Non-NULL child
+components still undergo their declaration/storage checks even when another component is
+NULL. Independent FK ids remain separate groups. Otherwise the complete
 typed tuple identifies the parent, keeping tenant-scoped keys distinct. Reverse edges are
 indexed by declared parent identity; visited-set closure traversal terminates cycles.
 SQLite [uses the parent's affinity and collation for FK equality](https://www.sqlite.org/foreignkeys.html#fk_basics);
-M2b conservatively rejects cross-affinity declarations and unsupported parent collations
+M2c conservatively rejects cross-affinity declarations and unsupported parent collations
 rather than changing values or constructing incomplete dependency edges. A parent removal
 also removes every dependent child recursively, irrespective of ON DELETE actions. Retained
 values are never changed to NULL or rewritten by cascading actions.
@@ -99,7 +121,7 @@ Missing or three-or-more-column PKs, BLOB/REAL/NUMERIC/other declared PK compone
 NULL or wrong-storage PK components,
 descending INTEGER PRIMARY KEY forms that do not alias rowid, unsupported FK declarations,
 non-PK UNIQUE FK targets, reordered explicit targets, mismatched FK cardinality,
-descending composite PK components, WITHOUT ROWID tables, virtual/shadow tables,
+descending composite or WITHOUT ROWID PK components, virtual/shadow tables,
 triggers and generated/hidden columns fail explicitly. Malformed text and unavailable custom
 collations produce handled database errors. Internal SQLite tables are excluded from row
 reduction. Declared table/index/view SQL and relevant metadata are preserved,
@@ -124,8 +146,11 @@ with AND; it cannot remove another tenant's row sharing an invoice number. All e
 rows are removed from a pristine private snapshot with FK actions disabled only there,
 then integrity and foreign keys are checked again. Retained values/schema are not rewritten.
 
-M2b preserves retained declared column values and keys, not hidden rowid identity. TEXT and
-composite PKs are separate from hidden rowids, which [SQLite may change during VACUUM](https://www.sqlite.org/rowidtable.html).
+M2c preserves retained declared column values and keys. Ordinary TEXT and composite PKs
+are separate from hidden rowids, which [SQLite may change during VACUUM](https://www.sqlite.org/rowidtable.html).
+WITHOUT ROWID tables have no hidden rowid: their declared PK supplies storage identity.
+Backup/private deletion/VACUUM INTO preserve the original storage declaration, indexes and
+metadata; no alternate reconstruction or deletion through SELECT rowid is needed.
 The reducer never substitutes hidden rowids for declared keys. Three fresh final confirmations
 of the exact VACUUM INTO output remain authoritative for the compact fixture's failure;
 rowid-sensitive application behavior is not presumed to survive compaction.
@@ -349,6 +374,7 @@ hostile process interference. Bounded process cleanup retains the platform cavea
 - [SQLite foreign keys](https://www.sqlite.org/foreignkeys.html)
 - [SQLite PRAGMAs](https://www.sqlite.org/pragma.html)
 - [SQLite CREATE TABLE and primary keys](https://www.sqlite.org/lang_createtable.html)
+- [SQLite WITHOUT ROWID differences](https://www.sqlite.org/withoutrowid.html)
 - [SQLite rowid tables and hidden rowid stability](https://www.sqlite.org/rowidtable.html)
 - [SQLite datatype affinity, storage classes and collations](https://www.sqlite.org/datatype3.html)
 - [Python 3.12 sqlite3](https://docs.python.org/3.12/library/sqlite3.html)

@@ -132,19 +132,57 @@ The independent composite billing application detects refunds incorrectly added 
 payments, using a full 1,308-row fixture and an eight-row wheel smoke. Reconfirm all five prior
 applications, genuine pre-M1b INTEGER and accepted M2a TEXT bundles, full schema rejection,
 invocation/interruption accounting, inspection and relocated replay. See
-[M2b completion evidence](m2b-completion.md) for actual checks and limits. Work stays
-unstaged/uncommitted for Dan; hosted M2b acceptance requires his subsequent commit/push.
+[M2b completion evidence](m2b-completion.md) for its historical local checks and limits.
+M2b was accepted at commit `d70edac43c22efe3df643b821af1c51ec756a945` in
+[hosted run 38592071692](https://github.com/chambies2015/ReproSeed/actions/runs/38592071692):
+Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12 all passed.
 
 Three-or-more-column PKs, descending composite components, arbitrary collations,
 cross-affinity coercions, alternate/reordered FK targets and WITHOUT ROWID remain rejected.
 M2b does not constitute a production-ready release.
 
-## M2c — future SQLite scope review
+## M2c — bounded SQLite WITHOUT ROWID support
 
-Review M2b's actual supported shapes, rejection evidence and performance before selecting
-another bounded SQLite addition. Wider arity, descending keys, WITHOUT ROWID or comparison
-extensions require explicit identity, preservation and FK contracts plus independent
-regressions; none is implemented or promised here. PostgreSQL remains later work.
+Extend the existing adapter to ordinary/STRICT WITHOUT ROWID tables with one exact
+INTEGER/TEXT PK component or two exact INTEGER/TEXT components. All WITHOUT ROWID PK
+components must be ascending and TEXT comparisons BINARY. table_list identifies storage
+layout; table_xinfo orders declared components and index_list/index_xinfo establish the
+declared PK, excluding auxiliary nonkey storage columns. Scalar INTEGER there is a declared
+indexed key, not a rowid alias. Retain the exact existing `(table, key)` identity, candidate
+cache and deterministic ordering contracts.
+
+Mixed-layout scalar/composite FK groups use the full parent PK and its component families.
+Any NULL child component creates no edge, while remaining components still undergo
+storage validation. Cycles, independent constraints and descendant closures share the
+existing reduction path. Private materialization and VACUUM INTO preserve exact retained
+declared values, storage declarations and schema; three fresh compact confirmations remain
+mandatory. Diagnosis, configuration, bundle/report/replay and diagnostic JSON stay version 1.
+
+The composite billing generator's explicit `--without-rowid` mode exercises five WITHOUT
+ROWID tables and ordinary INTEGER-keyed payments using the same defect and independent
+oracle. Reconfirm all six existing applications plus a full alternate-layout reduction
+starting with at least 1,200 rows, and use the genuine small variant for hosted wheel smoke.
+Generate genuine prior M2b composite evidence from its archived accepted source alongside
+the existing INTEGER/TEXT compatibility checks. Record actual counts, execution/budget/cache
+summaries, hashes, preserved values/schema/FKs, timing and file sizes. Preserve the hosted
+matrix and standard-library runtime. See [M2c completion evidence](m2c-completion.md) for
+actual validation and limits; hosted M2c acceptance requires Dan's subsequent commit/push.
+
+Three-or-more-component keys, descending WITHOUT ROWID/composite keys, arbitrary collations,
+coercive affinity matching, non-PK UNIQUE/reordered FK targets, generated/hidden columns,
+virtual/shadow tables and triggers remain rejected. SQLite itself rejects WITHOUT ROWID
+without a PK, AUTOINCREMENT and NULL PK inserts; these are separate from adapter rejection.
+PostgreSQL, LLM integration, web UI and package publication are outside M2c. Milestone work
+stays unstaged and uncommitted for Dan.
+
+## Proposed public-alpha readiness and usability review
+
+After M2c's hosted gate, separately review installation from the built package, first-use
+configuration/oracle guidance, diagnosis clarity, limits and failure messages, bundle sharing
+and relocated replay from a fresh environment. Use synthetic user journeys and document
+friction, platform gaps, execution trust boundaries and release criteria before deciding
+whether a public alpha is ready. This review is proposed follow-up work; M2c does not publish
+packages or declare the prototype production-ready.
 
 ## M3 — PostgreSQL
 

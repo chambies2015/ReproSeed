@@ -71,6 +71,11 @@ def database_state(database: Path) -> DatabaseState:
         metadata = {
             "user_version": connection.execute("PRAGMA user_version").fetchone()[0],
             "application_id": connection.execute("PRAGMA application_id").fetchone()[0],
+            "storage_layouts": {
+                row[1]: {"without_rowid": bool(row[4]), "strict": bool(row[5])}
+                for row in connection.execute("PRAGMA table_list")
+                if row[0] == "main" and row[1] in tables
+            },
             "tables": {
                 table: {
                     "columns": connection.execute(f"PRAGMA table_xinfo({quote(table)})").fetchall(),
@@ -281,6 +286,7 @@ def exercise_example(
     cli: list[str] | None = None,
     small_text_fixture: bool = False,
     small_composite_fixture: bool = False,
+    without_rowid_billing_fixture: bool = False,
 ) -> dict[str, Any]:
     """Run one complete real workflow; raise on any contract or row-target failure."""
     directory.mkdir(parents=True, exist_ok=False)
@@ -297,6 +303,9 @@ def exercise_example(
         small_composite_fixture and example == "composite_billing"
     )
     generator_flags = ["--small"] if small else []
+    without_rowid = without_rowid_billing_fixture and example == "composite_billing"
+    if without_rowid:
+        generator_flags.append("--without-rowid")
     succeeded(
         run(
             [str(python), str(source_root / "generate.py"), str(source), *generator_flags],
@@ -306,13 +315,18 @@ def exercise_example(
     original = database_state(source)
     original_rows = sum(original.counts.values())
     minimum_rows, maximum_rows = EXAMPLES[example]
-    if generator_flags:
+    if small:
         minimum_rows = maximum_rows = 8 if example == "composite_billing" else 10
     assert original_rows >= minimum_rows
     if example in {"duplicate_export", "threshold"}:
         assert original_rows == minimum_rows
     if example == "duplicate_export":
         assert original.counts == {"entries": 2400, "owners": 6, "projects": 24}
+    if example == "composite_billing":
+        assert original.metadata["storage_layouts"] == {
+            table: {"without_rowid": without_rowid and table != "payments", "strict": False}
+            for table in original.rows
+        }
     deterministic = directory / "deterministic.sqlite3"
     succeeded(
         run(
@@ -449,6 +463,8 @@ def exercise_example(
     assert hashes(unavailable_bundle) == bundle_before
     measurement = {
         "example": example,
+        "without_rowid_billing_fixture": without_rowid,
+        "generator_flags": generator_flags,
         "original_counts": original.counts,
         "final_counts": final.counts,
         "original_rows": original_rows,
@@ -502,6 +518,11 @@ def main() -> None:
         action="store_true",
         help="Use eight genuine billing rows for installed-wheel smoke; full fixture has 1308.",
     )
+    parser.add_argument(
+        "--without-rowid-billing-fixture",
+        action="store_true",
+        help="Use the mixed-layout WITHOUT ROWID variant of composite_billing.",
+    )
     arguments = parser.parse_args()
     directory = arguments.directory.resolve()
     directory.mkdir(parents=True, exist_ok=False)
@@ -526,6 +547,7 @@ def main() -> None:
             cli=cli,
             small_text_fixture=arguments.small_text_fixture,
             small_composite_fixture=arguments.small_composite_fixture,
+            without_rowid_billing_fixture=arguments.without_rowid_billing_fixture,
         )
         for example in arguments.examples
     ]

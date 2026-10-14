@@ -1,8 +1,9 @@
-"""Generate a genuine reviewed INTEGER or M2a TEXT version-1 bundle and check the CLI.
+"""Generate genuine reviewed INTEGER, TEXT or composite version-1 bundles.
 
 Run with --phase generate/validate separately to retain a pre-change bundle while
 implementing the new reader. Scratch output must be a new .validation directory.
 The default history is pre-M1b; --history m2a-text uses accepted M2a.1 source.
+The --history m2b-composite mode uses accepted M2b source and its genuine generator.
 This is an explicit integration recipe, not an automatically collected pytest test.
 """
 
@@ -23,9 +24,11 @@ from pathlib import Path
 REPOSITORY = Path(__file__).resolve().parents[1]
 REVIEWED_COMMIT = "ba40d64db748d974c36666294a1cc4500c79c25f"
 M2A_COMMIT = "d60c79c07ae12666af9572ced69edc3b9523ce17"
+M2B_COMMIT = "d70edac43c22efe3df643b821af1c51ec756a945"
 HISTORIES = {
     "pre-m1b": (REVIEWED_COMMIT, "threshold"),
     "m2a-text": (M2A_COMMIT, "text_key_entitlements"),
+    "m2b-composite": (M2B_COMMIT, "composite_billing"),
 }
 
 
@@ -98,7 +101,7 @@ def generate(directory: Path, history: str = "pre-m1b") -> None:
                     destination.write_bytes(source.read(entry))
     example = directory / "example"
     shutil.copytree(reviewed / "examples" / example_name, example)
-    generator_flags = ["--small"] if history == "m2a-text" else []
+    generator_flags = ["--small"] if history in {"m2a-text", "m2b-composite"} else []
     run([sys.executable, str(example / "generate.py"), *generator_flags], directory)
     source_before = hashes(example)
     cli(
@@ -206,7 +209,7 @@ def main() -> None:
         "--history",
         choices=tuple(HISTORIES),
         default="pre-m1b",
-        help="Reviewed pre-M1b INTEGER bundle or accepted M2a TEXT-key bundle.",
+        help="Reviewed pre-M1b INTEGER, accepted M2a TEXT, or accepted M2b composite bundle.",
     )
     arguments = parser.parse_args()
     directory = arguments.directory.resolve()

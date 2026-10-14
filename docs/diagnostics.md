@@ -13,7 +13,7 @@ interruption or a hard nonlaunch blocks completion. Every executed PASS or UNRES
 observation is retained and the remaining confirmations are attempted. All three must
 be TARGET_FAILURE; there is no majority vote.
 
-M2b uses the same `DatabaseModel` for diagnosis, reduction and private bundle validation.
+M2c uses the same `DatabaseModel` for diagnosis, reduction and private bundle validation.
 Exact declared TEXT PRIMARY KEY with a metadata-confirmed BINARY PK index is supported
 alongside the existing INTEGER rowid-alias family, including mixed tables and matching
 parent-family foreign keys. Exactly two ascending PK components of exact INTEGER/TEXT
@@ -21,11 +21,19 @@ declarations are also supported, with each family's storage checked independentl
 all TEXT comparisons BINARY. Empty tables undergo PK index and FK group metadata checks.
 Ordinary schemas with nullable TEXT/composite PK declarations are accepted only when
 actual components are non-NULL and stored as their declared integer/text family, with
-text decoding to Python strings.
+text decoding to Python strings. WITHOUT ROWID accepts the same scalar INTEGER/TEXT and
+two-component INTEGER/TEXT shapes, with every PK index component ascending. Its scalar
+INTEGER PK is validated as a declared indexed key rather than a rowid alias. table_list
+establishes storage layout, and index_xinfo auxiliary nonkey columns are excluded from
+PK arity. Mixed layouts, supported STRICT combinations and empty tables use these checks
+without a separate diagnosis or execution path. SQLite's own no-PK/AUTOINCREMENT/NULL-PK
+rejections are distinct from ReproSeed rejecting valid SQLite schemas outside this subset.
 FK policy comes from the referenced parent's ordered components, so the child's own PK can
 have another shape or family. Explicit composite target columns must follow parent PK
 order; implicit references use the complete PK. Any NULL child FK component means no
-parent is required and no dependency edge is created. NULL parent components remain
+parent is required and no dependency edge is created; non-NULL components still require
+the supported storage family. These rules apply across either table storage layout.
+NULL parent components remain
 unsupported. Unsupported collations, PK arity/order, NULL PK values, wrong stored key types,
 FK cardinality/targets and unsupported FK
 declarations have separate curated diagnostic causes. These expose no key values or raw
@@ -77,6 +85,10 @@ Composite causes include `unsupported_composite_primary_key_arity`,
 `unsupported_composite_foreign_key_type` and `unsupported_composite_foreign_key_value`.
 Alternate/reordered targets use the existing `unsupported_foreign_key_target` cause with
 curated full-PK wording. No component value, arbitrary SQL, process output or path is echoed.
+WITHOUT ROWID scalar metadata/order failures use `unsupported_primary_key_metadata` and
+`unsupported_primary_key_order`; unsupported component declarations use
+`unsupported_primary_key`. Scalar WITHOUT ROWID comparison failures use
+`unsupported_text_key_collation`, and composite failures retain the composite causes.
 These checks run before baseline launch and preserve diagnostic JSON version 1.
 Unavailable-collation and malformed-text errors conservatively leave `integrity_valid`
 null because validation may stop before establishing that result; a schema rejection does

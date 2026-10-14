@@ -16,7 +16,11 @@ paths, argv and marker values, rows, raw process output and inherited environmen
 Table names and fixed diagnostic causes remain visible; text escapes terminal controls.
 
 The shared schema model supports exact INTEGER rowid-alias, exact TEXT/BINARY primary
-keys and exactly two ascending INTEGER/TEXT PK components. Each composite component must
+keys and exactly two ascending INTEGER/TEXT PK components in ordinary rowid tables.
+WITHOUT ROWID tables support one or two exact INTEGER/TEXT components with a validated
+ascending declared PK index, including scalar INTEGER whose key is not a rowid alias.
+Storage layout comes from SQLite metadata and never becomes a substitute row identity.
+Each composite component must
 have its exact non-NULL integer/text storage, with BINARY TEXT index/default comparisons.
 Every TEXT PK must be a non-NULL stored TEXT value that decodes to a Python string;
 ordinary SQLite declarations that permit NULL are accepted only for snapshots with valid
@@ -25,8 +29,10 @@ INTEGER references retain integer-affinity declarations and stored integer or NU
 The referenced parent's component families determine this check. Composite FK constraints
 are one ordered group, explicitly or implicitly targeting the complete declared parent PK.
 Any NULL child component means no required parent and no dependency edge; NULL parent PK
-components are rejected. Unsupported cardinality, reordered/non-PK targets and descending
-composite PK components are rejected before launch, including in empty-table declarations.
+components are rejected. Non-NULL child components are validated even when another FK
+component is NULL. These checks apply to mixed rowid/WITHOUT ROWID dependencies in either
+direction. Unsupported cardinality, reordered/non-PK targets and descending composite or
+WITHOUT ROWID PK components are rejected before launch, including in empty-table declarations.
 Unsupported collations, malformed
 text and cross-affinity declarations are rejected; keys are never normalized to force support.
 
@@ -94,9 +100,13 @@ markers and diagnostic reasons can disclose sensitive information. Private searc
 and candidates contain source data. They are temporary, not securely erased. Final VACUUM
 INTO compaction removes unused pages from the exported fixture, but this does not certify
 that retained data is safe to share. Review every artifact before distributing a bundle.
-TEXT-keyed and composite-keyed tables do not alias their declared keys to SQLite's hidden rowid. VACUUM INTO
-may change those hidden rowids. Declared retained values and keys are preserved; hidden
-rowid identity is outside M2b's preservation contract. Publication still requires three
+Ordinary TEXT-keyed and composite-keyed tables do not alias their declared keys to SQLite's
+hidden rowid. VACUUM INTO may change those hidden rowids. WITHOUT ROWID tables have no
+hidden rowid and use declared PK storage identity; their INTEGER PK does not alias a rowid.
+ReproSeed does not rely on last_insert_rowid, rowid-based incremental BLOB I/O or update
+hooks for these tables. Declared retained values, keys and original storage declarations
+are preserved; ordinary hidden rowid identity is outside M2c's preservation contract.
+Publication still requires three
 fresh target confirmations of the exact compact fixture, including any rowid-sensitive
 application behavior.
 

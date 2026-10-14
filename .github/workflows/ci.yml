@@ -176,5 +176,15 @@ jobs:
                    "--examples", "composite_billing", "--small-composite-fixture"],
                   cwd=outside, env=environment, check=True, timeout=180,
               )
+              # The same independent billing application spans both storage layouts;
+              # keep installed-wheel coverage small instead of a second full reduction.
+              subprocess.run(
+                  [str(python), str(repository / "tests" / "milestone_smoke.py"),
+                   "--directory", str(outside / "without-rowid-billing-wheel-smoke"),
+                   "--python", str(python), "--cli", str(cli),
+                   "--examples", "composite_billing", "--small-composite-fixture",
+                   "--without-rowid-billing-fixture"],
+                  cwd=outside, env=environment, check=True, timeout=180,
+              )
           print("Installed wheel CLI diagnosed, reduced, inspected, and replayed outside the checkout.")
           PY

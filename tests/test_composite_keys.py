@@ -588,9 +588,9 @@ UNSUPPORTED_SCHEMAS = [
         id="descending-second-empty",
     ),
     pytest.param(
-        "CREATE TABLE private_items(a TEXT,b INTEGER,PRIMARY KEY(a,b)) WITHOUT ROWID",
-        "unsupported_without_rowid",
-        id="without-rowid",
+        "CREATE TABLE private_items(a TEXT,b INTEGER,c TEXT,PRIMARY KEY(a,b,c)) WITHOUT ROWID",
+        "unsupported_composite_primary_key_arity",
+        id="without-rowid-three-components",
     ),
     *[
         pytest.param(

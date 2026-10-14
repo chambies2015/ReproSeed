@@ -293,9 +293,19 @@ def _input_error(error: Exception, stage: str) -> DiagnosticError:
                     "Triggers are outside the supported schema subset.",
                 ),
                 (
-                    "Unsupported schema: WITHOUT ROWID table ",
-                    "unsupported_without_rowid",
-                    "WITHOUT ROWID tables are unsupported.",
+                    "Unsupported schema: WITHOUT ROWID primary-key index metadata",
+                    "unsupported_primary_key_metadata",
+                    "WITHOUT ROWID keys require a unique nonpartial declared PK index in PK order.",
+                ),
+                (
+                    "Unsupported schema: descending primary-key order",
+                    "unsupported_primary_key_order",
+                    "WITHOUT ROWID primary-key index components must be ascending.",
+                ),
+                (
+                    "Unsupported schema: WITHOUT ROWID key collation",
+                    "unsupported_text_key_collation",
+                    "WITHOUT ROWID primary-key indexes must use BINARY collation.",
                 ),
                 (
                     "Unsupported schema: generated or hidden columns in ",
@@ -365,7 +375,7 @@ def _input_error(error: Exception, stage: str) -> DiagnosticError:
                 (
                     "Unsupported schema: non-rowid-alias INTEGER primary key in ",
                     "unsupported_primary_key",
-                    "Each table needs one rowid-alias INTEGER PRIMARY KEY.",
+                    "Scalar INTEGER primary keys in ordinary rowid tables must alias rowid.",
                 ),
                 (
                     "Unsupported schema: virtual table ",
