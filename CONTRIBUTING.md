@@ -11,9 +11,10 @@ uv run mypy
 uv run mypy --platform linux
 uv run --locked python -c "from pathlib import Path; Path('.validation').mkdir(exist_ok=True)"
 uv run pytest --basetemp=.validation/pytest
-uv run pytest tests/test_text_keys.py tests/test_diagnose_cli.py tests/test_diagnostics.py tests/test_realistic_acceptance.py --basetemp=.validation/pytest-focused
-uv run --locked python tests/milestone_smoke.py --directory .validation/m2a-measurements-fresh
+uv run pytest tests/test_composite_keys.py tests/test_text_keys.py tests/test_diagnose_cli.py tests/test_diagnostics.py tests/test_realistic_acceptance.py --basetemp=.validation/pytest-focused
+uv run --locked python tests/milestone_smoke.py --directory .validation/m2b-measurements-fresh
 uv run --locked python tests/compatibility_smoke.py --directory .validation/pre-m1b-v1-fresh
+uv run --locked python tests/compatibility_smoke.py --directory .validation/m2a-text-v1-fresh --history m2a-text
 uv build --no-sources
 ```
 
@@ -35,29 +36,46 @@ default JSON, explicit JSON and text, relocate and replay it. Do not let an edit
 installation hide a broken wheel. The compatibility recipe requires a new tool-owned
 scratch directory under `.validation`; it generates a genuine version-1 bundle from the
 reviewed pre-M1b source before checking the current reader and replay.
+The separate `--history m2a-text` mode archives accepted M2a.1 source at
+`d60c79c07ae12666af9572ced69edc3b9523ce17` and generates a genuine prior TEXT-key bundle.
+Each generation records source commit/archive hash and original source/bundle hashes.
+Use `--phase generate` before reader changes and `--phase validate` afterward when useful;
+never regenerate or modify historical bundles/reports to match the new reader.
 
 The installed-wheel threshold smoke also exercises default-text static diagnosis and
 JSON static/executable diagnosis. Use `tests/milestone_smoke.py --directory <new-directory>
---python <installed-interpreter> --cli <installed-console>` for all five measured examples.
+--python <installed-interpreter> --cli <installed-console>` for all six measured examples.
 Run it outside the checkout with an isolated wheel installation. It records counts, actual
 invocations, budget, cache/acceptance summaries, elapsed reduction time, file sizes and
 source/bundle hash equality. It checks retained values/schema/metadata and replays relocated
 bundles after original example paths are made unavailable. Large reductions belong in the
 acceptance suite and explicit measurement recipe, not repeated in small formatting tests.
 
-M2a validation also requires `tests/test_text_keys.py` and the
-`examples/text_key_entitlements/` acceptance application. Exercise static and executable
+M2b validation also requires `tests/test_composite_keys.py`, `tests/test_text_keys.py`,
+the five established application reductions and `examples/composite_billing/`.
+The full billing fixture has 1,308 user rows; retain a finite invocation budget and
+investigate failure to reach at most 16 rows without weakening correctness or changing
+the generic search heuristic. Exercise static and executable
 diagnosis, reduction, default/explicit JSON and text inspection, and three-confirmation
 relocated replay with the installed wheel outside the checkout. Retain source/assets/bundle
 hash equality and declared-value/schema checks; do not assert hidden-rowid equality after
-TEXT-key compaction. Record text/integer example counts, per-table counts, actual invocations
+TEXT/composite-key compaction. Record scalar/composite example counts, per-table counts, actual invocations
 and finite budget, cache hits, acceptances, invalid/unresolved trials, runtime and fixture sizes.
 Keep large measurement runs explicit rather than multiplying them across small smoke tests.
+Installed-wheel CI reuses the full lifecycle with `--examples composite_billing
+--small-composite-fixture` (eight genuine billing rows) and the existing ten-row
+`--examples text_key_entitlements --small-text-fixture` smoke. These retain real application
+decisions, static/executable diagnosis, default/explicit JSON and text inspection, and
+three fresh relocated replay confirmations. Runtime imports must come from the wheel.
 
 For rejection fixtures, prove diagnosis and reduction never launch the oracle, publish no
 verified bundle and preserve source hashes. Cover exact TEXT/BINARY keys, nullable-schema
 non-NULL snapshots, wrong storage, malformed text, unsupported collations/FK declarations,
 mixed-family dependencies, empty/Unicode/quoted/NUL keys and cycles using real SQLite files.
+Composite fixtures cover all four component-family pairs, full FK groups, implicit/explicit
+targets, partial NULL child tuples, cross-tenant tuple identity and multi-level closures.
+Reject nullable parent components, wrong storage, descending components, malformed PK
+index metadata, alternate/reordered targets and FK cardinality mismatches even when empty.
 Ordinary integer ordering and cancellation/accounting regressions must continue to pass.
 
 Use a clean copy prepared with CI's explicit `.validation` parent; run full tests, builds
@@ -98,7 +116,11 @@ Keep source acquisition, candidate state and oracle state separate. Preserve val
 schema. Add meaningful regression cases for contracts changed by a patch. Do not weaken
 acceptance assertions or silently skip failures. Read AGENTS.md before implementation and
 SECURITY.md before executing external oracle code. Publishing and later roadmap milestones
-are outside M2a. Leave milestone work unstaged and uncommitted for Dan's review; do not
+are outside M2b. Leave milestone work unstaged and uncommitted for Dan's review; do not
 push, open a PR, tag, release or publish packages. M1b.2's accepted hosted evidence is
 commit `c9cf32ced7f0428385d1daad912d5aa01fec6967`, run `38476866662`, all three jobs
-successful. Historical completion reports stay unchanged; M2a hosted evidence remains pending.
+successful. M2a.1 was accepted at commit `d60c79c07ae12666af9572ced69edc3b9523ce17` in
+[hosted run 38572680512](https://github.com/chambies2015/ReproSeed/actions/runs/38572680512),
+also with all three jobs successful. Historical completion reports stay unchanged;
+M2b hosted acceptance remains pending Dan's subsequent commit/push. Do not implement M2c
+or PostgreSQL in this change, and do not call the prototype production-ready.

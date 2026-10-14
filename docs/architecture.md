@@ -1,4 +1,4 @@
-# M2a architecture
+# M2b architecture
 
 The contract is: smaller fixture, same specified failure, independently replayable evidence.
 "Same" is the configured exit/marker contract. ReproSeed does not infer semantic equivalence
@@ -12,7 +12,8 @@ between arbitrary crashes. The runtime uses Python 3.12+ standard-library module
    Incremental backup callbacks enforce a five-second deadline for lock retries/restarts.
 3. Validate structural integrity, inspect schema/storage metadata and construct
    stable `(table, declared primary key)` identities plus reverse FK edges. Each table's
-   metadata selects its integer or text key family; stored values never select the family.
+   metadata selects its ordered integer/text key component families; stored values never
+   select the families. Composite foreign-key groups become complete tuple edges.
    Check foreign-key consistency after schema/storage acceptance so unsupported key
    declarations and values produce their specific errors before relational validation.
 4. Confirm baseline three times, each using fresh staged database/assets. Abort on any
@@ -37,18 +38,22 @@ normal WAL shared-memory sidecar. An arbitrary oracle is not constrained by this
 
 ## Supported schema
 
-SQLite >=3.37 is required for table_list metadata. Supported user tables are ordinary rowid
-tables with exactly one declared PK in one of two families:
+SQLite >=3.37 is required for table_list metadata. Supported user tables are ordinary or
+STRICT rowid tables with one of these declared primary-key shapes:
 
 | Family | Declaration and metadata | Actual stored values |
 | --- | --- | --- |
 | INTEGER | Exact declared INTEGER; aliases rowid, established by absence of a separate PK index | Integers; negative, sparse and zero keys supported |
 | TEXT | Exact declared TEXT; single-column PK index established by index_list/index_xinfo, with BINARY comparison | Non-NULL SQLite TEXT that decodes correctly to Python strings |
+| Two-column composite | Exactly two ascending PK components, each exact declared INTEGER or TEXT; a unique nonpartial declared PK index matches their order and BINARY comparisons | Every INTEGER component is non-NULL SQLite integer; every TEXT component is non-NULL SQLite text that decodes safely |
 
 Type-name case and surrounding whitespace are ignored; VARCHAR/CHAR and other text-affinity
-spellings are outside M2a. Inline and table-level single-column TEXT PKs are supported, with
+spellings are outside M2b. INTEGER+INTEGER, INTEGER+TEXT, TEXT+INTEGER and TEXT+TEXT
+composite shapes are supported. Inline and table-level single-column TEXT PKs are supported, with
 or without explicit NOT NULL. An ordinary non-STRICT SQLite PK can permit NULL; this schema
-is accepted only when every snapshot PK value is non-NULL. STRICT tables are supported,
+is accepted only when every snapshot PK component is non-NULL and has the required storage.
+This stricter identity policy applies even though SQLite may allow NULL in ordinary
+composite PKs. STRICT tables are supported,
 as is AUTOINCREMENT on an INTEGER rowid alias. Empty tables, empty strings, Unicode,
 SQL quotes, embedded NULs and case-sensitive distinct text keys are supported. Identifiers
 are quoted, including embedded quotes. See SQLite's [CREATE TABLE rules](https://www.sqlite.org/lang_createtable.html).
@@ -59,27 +64,42 @@ normalization. The declared PK index and its key-column collation are checked us
 An empty isolated in-memory schema probe derives the column's default collation through
 a plain index, since a table-level PK can override the column collation. Both must be BINARY;
 the adapter delegates this to SQLite instead of parsing CREATE TABLE with regular expressions.
-NOCASE, RTRIM, custom collations and unsupported PK index metadata are rejected explicitly.
+Composite metadata follows table_xinfo PK ordinals, locates the declared PK through
+index_list, and checks ordered key entries from index_xinfo. Auxiliary rowid entries are
+not PK components. Unique/nonpartial origin, column identity, component count, ascending
+order and comparison collations are checked even for empty tables. INTEGER composite
+components are not rowid aliases; scalar INTEGER retains its separate alias requirement.
+NOCASE, RTRIM, custom collations, descending composite components and unsupported PK index
+metadata are rejected explicitly.
 This restriction makes exact text dependency identities agree with the supported BINARY
 comparison semantics; it does not approximate arbitrary SQLite comparisons. SQLite describes
 its [storage classes, affinity and collations](https://www.sqlite.org/datatype3.html).
 
-Foreign keys must be single columns referencing the supported parent's declared PK,
-explicitly or implicitly. The parent family determines the policy, independently of the
-child table's PK: INTEGER parents require integer-affinity child columns (declared type
-contains INT) and actual integer or NULL values; TEXT parents require exact declared TEXT
-child columns and actual TEXT or NULL values that decode correctly. An INTEGER-keyed child
-may reference a TEXT parent and a TEXT-keyed child may reference an INTEGER parent. Multiple
-FKs, nullable references, self-references, mixed-family chains and cycles are supported.
+Foreign keys must reference the complete supported parent's declared PK, explicitly in
+the parent's PK order or implicitly by omitting the target column list. foreign_key_list
+rows are grouped by constraint id and ordered by component sequence. Cardinality and
+all targets are checked as one constraint; a two-column FK is never two scalar edges.
+The parent component family determines the policy, independently of the child table's PK:
+INTEGER parents require integer-affinity child columns (declared type contains INT) and
+actual integer or NULL values; TEXT parents require exact declared TEXT child columns and
+actual TEXT or NULL values that decode correctly. Scalar-keyed children may reference
+composite parents, and composite-keyed children may reference scalar or composite parents.
+Multiple scalar/composite FKs, self-references, mixed-family chains and cycles are supported.
+If any child FK component is NULL, SQLite requires no parent; ReproSeed creates no edge for
+that group. This includes both fully NULL and partially NULL tuples. Otherwise the complete
+typed tuple identifies the parent, keeping tenant-scoped keys distinct. Reverse edges are
+indexed by declared parent identity; visited-set closure traversal terminates cycles.
 SQLite [uses the parent's affinity and collation for FK equality](https://www.sqlite.org/foreignkeys.html#fk_basics);
-M2a conservatively rejects cross-affinity declarations and unsupported parent collations
+M2b conservatively rejects cross-affinity declarations and unsupported parent collations
 rather than changing values or constructing incomplete dependency edges. A parent removal
 also removes every dependent child recursively, irrespective of ON DELETE actions. Retained
 values are never changed to NULL or rewritten by cascading actions.
 
-Missing/composite PKs, BLOB/REAL/other declared PK types, NULL or non-TEXT TEXT keys,
+Missing or three-or-more-column PKs, BLOB/REAL/NUMERIC/other declared PK components,
+NULL or wrong-storage PK components,
 descending INTEGER PRIMARY KEY forms that do not alias rowid, unsupported FK declarations,
-non-PK UNIQUE FK targets, composite FKs, WITHOUT ROWID tables, virtual/shadow tables,
+non-PK UNIQUE FK targets, reordered explicit targets, mismatched FK cardinality,
+descending composite PK components, WITHOUT ROWID tables, virtual/shadow tables,
 triggers and generated/hidden columns fail explicitly. Malformed text and unavailable custom
 collations produce handled database errors. Internal SQLite tables are excluded from row
 reduction. Declared table/index/view SQL and relevant metadata are preserved,
@@ -88,16 +108,25 @@ Views/indexes are preserved, not silently dropped. Application dependencies such
 SQLite functions/collations may cause validation or private construction to fail and are not
 automatically loaded. Arbitrary SQLite schemas are deferred.
 
-Row identities are `tuple[str, int | str]`. A table has one metadata-established key family,
-so deterministic table/key ordering never compares an integer with a string within one
-table and preserves the existing integer ordering. Candidate-cache identity uses these
-uncoerced declared values; text `"42"` and integer `42` are distinct. Reports record counts
+Scalar keys retain `int | str`; composite keys are `tuple[int | str, int | str]` in declared
+PK order. Row identities are `(table, key)`, for example `("invoices", ("tenant-a", 42))`.
+This differs from `("invoices", ("tenant-b", 42))`; text `"42"` never becomes integer `42`.
+A table has fixed metadata-established component families, including when empty.
+Explicit deterministic sort tokens preserve scalar numeric/text ordering and compare
+composite components in declared order without mixed-type TypeError. Candidate-cache
+identities remain exact, hashable retained identity sets. Reports record counts
 and confirmation evidence, not individual retained identities; configuration, bundle,
 report, replay and diagnostic formats remain version 1.
 
-M2a preserves retained declared column values and keys, not hidden rowid identity. TEXT
-PKs are separate from hidden rowids, which [SQLite may change during VACUUM](https://www.sqlite.org/rowidtable.html).
-The reducer never substitutes hidden rowids for text keys. Three fresh final confirmations
+Candidate deletion quotes each PK column and binds each component in PK order, using
+explicit BINARY comparisons where needed. A composite deletion combines both predicates
+with AND; it cannot remove another tenant's row sharing an invoice number. All excluded
+rows are removed from a pristine private snapshot with FK actions disabled only there,
+then integrity and foreign keys are checked again. Retained values/schema are not rewritten.
+
+M2b preserves retained declared column values and keys, not hidden rowid identity. TEXT and
+composite PKs are separate from hidden rowids, which [SQLite may change during VACUUM](https://www.sqlite.org/rowidtable.html).
+The reducer never substitutes hidden rowids for declared keys. Three fresh final confirmations
 of the exact VACUUM INTO output remain authoritative for the compact fixture's failure;
 rowid-sensitive application behavior is not presumed to survive compaction.
 
@@ -319,6 +348,9 @@ hostile process interference. Bounded process cleanup retains the platform cavea
 - [SQLite backup API](https://www.sqlite.org/backup.html)
 - [SQLite foreign keys](https://www.sqlite.org/foreignkeys.html)
 - [SQLite PRAGMAs](https://www.sqlite.org/pragma.html)
+- [SQLite CREATE TABLE and primary keys](https://www.sqlite.org/lang_createtable.html)
+- [SQLite rowid tables and hidden rowid stability](https://www.sqlite.org/rowidtable.html)
+- [SQLite datatype affinity, storage classes and collations](https://www.sqlite.org/datatype3.html)
 - [Python 3.12 sqlite3](https://docs.python.org/3.12/library/sqlite3.html)
 - [Python 3.12 subprocess](https://docs.python.org/3.12/library/subprocess.html)
 - [Python 3.12 signal exceptions](https://docs.python.org/3.12/library/signal.html#note-on-signal-handlers-and-exceptions)

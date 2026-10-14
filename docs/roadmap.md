@@ -99,7 +99,8 @@ pushed as `eb8108dece9055dc9180826f42de03363cb64cbe`. Hosted
 [run 38564568013](https://github.com/chambies2015/ReproSeed/actions/runs/38564568013)
 passed both Ubuntu jobs (Python 3.12/3.14), but Windows/Python 3.12 failed two bundle
 path-security fixture setups in job `115853833714`; build and installed-wheel steps
-were skipped. M2a's hosted gate is therefore incomplete. Historical completion reports
+were skipped. That run did not complete M2a's hosted gate; M2a.1 below records its accepted
+repair. Historical completion reports
 retain their original local observations. M2a is a prototype milestone, not a
 production-ready or alpha release.
 
@@ -109,19 +110,41 @@ Investigate the shared one-second fixture deadline, retain real mutating subproc
 and six strict baseline/final confirmations, and strengthen synthetic setup diagnostics
 and separate deadline regressions. See [M2a.1 completion evidence](m2a1-completion.md)
 for actual timing probes, finite Windows stability results and platform validation.
-This follow-up repair remains unstaged and uncommitted for Dan; hosted acceptance
-requires the new commit's GitHub CI run. M2b remains planned and is not implemented
-in this patch.
+The repair was accepted at commit `d60c79c07ae12666af9572ced69edc3b9523ce17` in
+[hosted run 38572680512](https://github.com/chambies2015/ReproSeed/actions/runs/38572680512):
+Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12 passed. This closes the
+M2a hosted gate. The historical completion reports preserve their original local evidence.
+TEXT entitlements reduced 970 -> 10 rows; together with the four established application
+results, this is an observation for a fixture rather than a generic reducer requirement.
 
-## M2b — proposed composite-key support
+## M2b — bounded two-column composite keys
 
-Investigate single-family or mixed-family composite primary keys with explicitly matching
-composite foreign keys, retaining the INTEGER/TEXT and BINARY restrictions where applicable.
-This is a proposal, not implemented support. Establish metadata-driven tuple identities,
-per-column storage/NULL/collation rules, parent affinity semantics and deterministic ordering
-before selecting a bounded addition. Add a separate realistic fixture and rejection tests,
-then extend shared diagnosis/candidate/bundle/replay checks together. Defer arbitrary collations
-and WITHOUT ROWID until their preservation and comparison contracts can be justified.
+Support ordinary/STRICT rowid tables with exactly two ascending declared PK components,
+each exact INTEGER or TEXT. Ordered metadata and actual non-NULL storage define complete
+tuple identities. Preserve scalar ordering, BINARY text index/default comparisons and
+parent-driven child storage rules. Composite FKs are grouped constraints targeting the
+full parent PK in order, explicitly or implicitly; any NULL child component creates no edge.
+Scalar/composite children and parents, multiple FKs, cycles and mixed families share the
+existing lifecycle and version-1 formats. Retained declared values survive compaction;
+hidden rowids are outside the preservation contract.
+
+The independent composite billing application detects refunds incorrectly added to settled
+payments, using a full 1,308-row fixture and an eight-row wheel smoke. Reconfirm all five prior
+applications, genuine pre-M1b INTEGER and accepted M2a TEXT bundles, full schema rejection,
+invocation/interruption accounting, inspection and relocated replay. See
+[M2b completion evidence](m2b-completion.md) for actual checks and limits. Work stays
+unstaged/uncommitted for Dan; hosted M2b acceptance requires his subsequent commit/push.
+
+Three-or-more-column PKs, descending composite components, arbitrary collations,
+cross-affinity coercions, alternate/reordered FK targets and WITHOUT ROWID remain rejected.
+M2b does not constitute a production-ready release.
+
+## M2c — future SQLite scope review
+
+Review M2b's actual supported shapes, rejection evidence and performance before selecting
+another bounded SQLite addition. Wider arity, descending keys, WITHOUT ROWID or comparison
+extensions require explicit identity, preservation and FK contracts plus independent
+regressions; none is implemented or promised here. PostgreSQL remains later work.
 
 ## M3 — PostgreSQL
 

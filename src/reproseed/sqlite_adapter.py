@@ -10,11 +10,20 @@ from collections.abc import Iterable, Set
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
-Key = int | str
+ScalarKey = int | str
+CompositeKey = tuple[ScalarKey, ScalarKey]
+Key = ScalarKey | CompositeKey
 KeyFamily = Literal["INTEGER", "TEXT"]
 RowId = tuple[str, Key]
+
+
+def row_sort_key(row: RowId) -> tuple[str, tuple[tuple[int, ScalarKey], ...]]:
+    """Keep legacy scalar ordering and compare typed composite components lexically."""
+    name, key = row
+    components = key if isinstance(key, tuple) else (key,)
+    return name, tuple((0 if isinstance(value, int) else 1, value) for value in components)
 
 
 class DatabaseError(ValueError):
@@ -143,8 +152,8 @@ def compact(source: Path, destination: Path) -> None:
 @dataclass(frozen=True)
 class _Table:
     name: str
-    primary_key: str
-    key_family: KeyFamily
+    primary_keys: tuple[str, ...]
+    key_families: tuple[KeyFamily, ...]
     column_types: dict[str, str]
 
 
@@ -164,15 +173,17 @@ class DatabaseModel:
                 tables = _read_tables(connection)
                 rows: list[RowId] = []
                 for table in tables:
-                    _validate_key_storage(connection, table, table.primary_key, primary=True)
-                    sql = (
-                        f"SELECT {_quote(table.primary_key)} FROM {_quote(table.name)} "
-                        "ORDER BY 1 COLLATE BINARY"
+                    for column, family in zip(table.primary_keys, table.key_families, strict=True):
+                        _validate_key_storage(
+                            connection, table, column, primary=True, family=family
+                        )
+                    selected = ", ".join(_quote(column) for column in table.primary_keys)
+                    order = ", ".join(
+                        f"{_quote(column)} COLLATE BINARY" for column in table.primary_keys
                     )
-                    for (value,) in _key_rows(connection, sql):
-                        if not isinstance(value, int | str):
-                            raise DatabaseError("Invalid primary-key value")
-                        rows.append((table.name, value))
+                    sql = f"SELECT {selected} FROM {_quote(table.name)} ORDER BY {order}"
+                    for values in _key_rows(connection, sql):
+                        rows.append((table.name, _identity(values)))
                 dependents = _read_dependencies(connection, tables)
                 _validate_foreign_keys(connection)
                 return cls(tuple(rows), tables, dependents)
@@ -220,12 +231,11 @@ class DatabaseModel:
                 connection.execute("PRAGMA foreign_keys = OFF")
                 with connection:
                     for table in self._tables:
-                        sql = (
-                            f"DELETE FROM {_quote(table.name)} "
-                            f"WHERE {_quote(table.primary_key)} COLLATE BINARY = ?"
+                        sql = f"DELETE FROM {_quote(table.name)} WHERE " + " AND ".join(
+                            f"{_quote(column)} COLLATE BINARY = ?" for column in table.primary_keys
                         )
                         deleted = (
-                            (key,)
+                            key if isinstance(key, tuple) else (key,)
                             for name, key in self.rows
                             if name == table.name and (name, key) not in retained
                         )
@@ -258,20 +268,54 @@ def _read_tables(connection: sqlite3.Connection) -> tuple[_Table, ...]:
         columns = connection.execute(f"PRAGMA main.table_xinfo({_quote(name)})").fetchall()
         if any(column[6] != 0 for column in columns):
             raise DatabaseError(f"Unsupported schema: generated or hidden columns in {name!r}")
-        primary = [column for column in columns if column[5] != 0]
-        if len(primary) != 1 or primary[0][2].strip().upper() not in {"INTEGER", "TEXT"}:
+        primary = sorted((column for column in columns if column[5] != 0), key=lambda c: c[5])
+        if len(primary) > 2:
+            raise DatabaseError("Unsupported schema: composite primary-key arity must be two")
+        if not primary or any(
+            column[2].strip().upper() not in {"INTEGER", "TEXT"} for column in primary
+        ):
             raise DatabaseError(
-                f"Unsupported schema: {name!r} requires one INTEGER or TEXT PRIMARY KEY"
+                "Unsupported schema: requires INTEGER or TEXT PRIMARY KEY components"
             )
-        family: KeyFamily = "TEXT" if primary[0][2].strip().upper() == "TEXT" else "INTEGER"
+        families: tuple[KeyFamily, ...] = tuple(
+            "TEXT" if column[2].strip().upper() == "TEXT" else "INTEGER" for column in primary
+        )
         # INTEGER PRIMARY KEY DESC is not a rowid alias and can contain NULL/noninteger keys.
         indexes = connection.execute(f"PRAGMA main.index_list({_quote(name)})").fetchall()
         primary_indexes = [index for index in indexes if index[3] == "pk"]
-        if family == "INTEGER" and primary_indexes:
+        if len(primary) == 1 and families == ("INTEGER",) and primary_indexes:
             raise DatabaseError(
                 f"Unsupported schema: non-rowid-alias INTEGER primary key in {name!r}"
             )
-        if family == "TEXT":
+        if len(primary) == 2:
+            if [column[5] for column in primary] != [1, 2] or len(primary_indexes) != 1:
+                raise DatabaseError("Unsupported schema: composite primary-key index metadata")
+            index = primary_indexes[0]
+            if index[2] != 1 or index[4] != 0:
+                raise DatabaseError("Unsupported schema: composite primary-key index metadata")
+            keys = [
+                entry
+                for entry in connection.execute(f"PRAGMA main.index_xinfo({_quote(index[1])})")
+                if entry[5] == 1
+            ]
+            if len(keys) != 2 or any(
+                entry[0] != ordinal or entry[1] != column[0] or entry[2] != column[1]
+                for ordinal, (entry, column) in enumerate(zip(keys, primary, strict=True))
+            ):
+                raise DatabaseError("Unsupported schema: composite primary-key index metadata")
+            if any(entry[3] != 0 for entry in keys):
+                raise DatabaseError("Unsupported schema: descending composite primary-key order")
+            if any(not isinstance(entry[4], str) or entry[4].upper() != "BINARY" for entry in keys):
+                raise DatabaseError("Unsupported schema: composite key collation must be BINARY")
+            for column, family in zip(primary, families, strict=True):
+                if family == "TEXT":
+                    try:
+                        _binary_column_collation(connection, name, column[1])
+                    except DatabaseError as exc:
+                        raise DatabaseError(
+                            "Unsupported schema: composite key collation must be BINARY"
+                        ) from exc
+        elif families == ("TEXT",):
             if len(primary_indexes) != 1:
                 raise DatabaseError("Unsupported schema: TEXT primary-key index metadata")
             index = primary_indexes[0]
@@ -280,7 +324,7 @@ def _read_tables(connection: sqlite3.Connection) -> tuple[_Table, ...]:
             _binary_key_index(connection, index[1], primary[0][0], primary[0][1])
             _binary_column_collation(connection, name, primary[0][1])
         types = {column[1]: column[2] for column in columns}
-        tables.append(_Table(name, primary[0][1], family, types))
+        tables.append(_Table(name, tuple(column[1] for column in primary), families, types))
     return tuple(tables)
 
 
@@ -338,23 +382,32 @@ def _key_rows(connection: sqlite3.Connection, sql: str) -> list[tuple[object, ..
         raise
 
 
+def _identity(values: tuple[object, ...]) -> Key:
+    if len(values) == 1 and isinstance(values[0], int | str):
+        return values[0]
+    if len(values) == 2 and isinstance(values[0], int | str) and isinstance(values[1], int | str):
+        return values[0], values[1]
+    raise DatabaseError("Unsupported schema: invalid declared key value")
+
+
 def _validate_key_storage(
     connection: sqlite3.Connection,
     table: _Table,
     column: str,
     *,
     primary: bool,
-    family: KeyFamily | None = None,
+    family: KeyFamily,
+    composite_fk: bool = False,
 ) -> None:
-    family = table.key_family if family is None else family
     identifier = _quote(column)
     if (
         primary
-        and family == "TEXT"
         and connection.execute(
             f"SELECT 1 FROM {_quote(table.name)} WHERE {identifier} IS NULL LIMIT 1"
         ).fetchone()
     ):
+        if len(table.primary_keys) == 2:
+            raise DatabaseError("Unsupported schema: NULL composite primary-key component")
         raise DatabaseError("Unsupported schema: NULL TEXT primary-key value")
     storage = "text" if family == "TEXT" else "integer"
     if connection.execute(
@@ -362,9 +415,23 @@ def _validate_key_storage(
         f"WHERE {identifier} IS NOT NULL AND typeof({identifier}) != ? LIMIT 1",
         (storage,),
     ).fetchone():
+        if primary and len(table.primary_keys) == 2:
+            raise DatabaseError(
+                "Unsupported schema: invalid composite primary-key component storage"
+            )
+        if composite_fk:
+            raise DatabaseError(
+                "Unsupported schema: invalid composite foreign-key component storage"
+            )
         role = "primary-key" if primary else "foreign-key"
         prefix = "Nontext" if family == "TEXT" else "Noninteger"
         raise DatabaseError(f"{prefix} {role} value in {table.name!r}")
+    if not primary and family == "TEXT":
+        # Decode even components of partial-NULL references, which create no edge.
+        _key_rows(
+            connection,
+            f"SELECT {identifier} FROM {_quote(table.name)} WHERE {identifier} IS NOT NULL",
+        )
 
 
 def _read_dependencies(
@@ -380,38 +447,74 @@ def _read_dependencies(
             groups[foreign_key[0]].append(foreign_key)
         columns = {_identifier_key(name): name for name in table.column_types}
         for group in groups.values():
-            if len(group) != 1:
-                raise DatabaseError(f"Unsupported schema: composite foreign key in {table.name!r}")
-            _fk_id, _seq, parent_name, source_column, target_column, *_actions = group[0]
-            if not isinstance(parent_name, str) or not isinstance(source_column, str):
+            if any(not isinstance(component[1], int) for component in group):
+                raise DatabaseError("Unsupported schema: inconsistent foreign-key group metadata")
+            group.sort(key=lambda component: cast(int, component[1]))
+            parent_name = group[0][2]
+            if not isinstance(parent_name, str):
                 raise DatabaseError(f"Invalid foreign-key metadata in {table.name!r}")
             parent = by_name.get(_identifier_key(parent_name))
             if parent is None:
                 raise DatabaseError(f"Unsupported schema: foreign-key parent {parent_name!r}")
-            if target_column is not None and (
-                not isinstance(target_column, str)
-                or _identifier_key(target_column) != _identifier_key(parent.primary_key)
+            # Explicit alternate targets are unsupported even if they form a UNIQUE index.
+            targets = tuple(component[4] for component in group)
+            if any(target is not None for target in targets) and (
+                len(targets) != len(parent.primary_keys)
+                or any(
+                    not isinstance(target, str)
+                    or _identifier_key(target) != _identifier_key(column)
+                    for target, column in zip(targets, parent.primary_keys, strict=True)
+                )
             ):
                 raise DatabaseError(
                     f"Unsupported schema: foreign key must target {parent.name!r} PK"
                 )
-            actual_column = columns.get(_identifier_key(source_column))
-            if actual_column is None:
-                raise DatabaseError(f"Invalid foreign-key metadata in {table.name!r}")
-            declared_type = table.column_types[actual_column].strip().upper()
-            if parent.key_family == "INTEGER" and "INT" not in declared_type:
-                raise DatabaseError(f"Unsupported schema: noninteger foreign key in {table.name!r}")
-            if parent.key_family == "TEXT" and declared_type != "TEXT":
-                raise DatabaseError(f"Unsupported schema: nontext foreign key in {table.name!r}")
-            _validate_key_storage(
-                connection, table, actual_column, primary=False, family=parent.key_family
-            )
-            sql = (
-                f"SELECT {_quote(table.primary_key)}, {_quote(actual_column)} "
-                f"FROM {_quote(table.name)} WHERE {_quote(actual_column)} IS NOT NULL"
-            )
-            for child_key, parent_key in _key_rows(connection, sql):
-                if not isinstance(child_key, int | str) or not isinstance(parent_key, int | str):
-                    raise DatabaseError("Invalid foreign-key value")
+            if len(group) != len(parent.primary_keys):
+                raise DatabaseError(
+                    "Unsupported schema: composite foreign-key cardinality mismatch"
+                )
+            if any(
+                component[1] != sequence
+                or component[2] != parent_name
+                or component[5:] != group[0][5:]
+                for sequence, component in enumerate(group)
+            ):
+                raise DatabaseError("Unsupported schema: inconsistent foreign-key group metadata")
+            sources: list[str] = []
+            composite_fk = len(group) == 2
+            for component, family in zip(group, parent.key_families, strict=True):
+                source_column = component[3]
+                if not isinstance(source_column, str):
+                    raise DatabaseError(f"Invalid foreign-key metadata in {table.name!r}")
+                actual_column = columns.get(_identifier_key(source_column))
+                if actual_column is None:
+                    raise DatabaseError(f"Invalid foreign-key metadata in {table.name!r}")
+                declared_type = table.column_types[actual_column].strip().upper()
+                if (family == "INTEGER" and "INT" not in declared_type) or (
+                    family == "TEXT" and declared_type != "TEXT"
+                ):
+                    if composite_fk:
+                        raise DatabaseError(
+                            "Unsupported schema: incompatible composite foreign-key component type"
+                        )
+                    prefix = "noninteger" if family == "INTEGER" else "nontext"
+                    raise DatabaseError(
+                        f"Unsupported schema: {prefix} foreign key in {table.name!r}"
+                    )
+                _validate_key_storage(
+                    connection,
+                    table,
+                    actual_column,
+                    primary=False,
+                    family=family,
+                    composite_fk=composite_fk,
+                )
+                sources.append(actual_column)
+            selected = ", ".join(_quote(column) for column in (*table.primary_keys, *sources))
+            populated = " AND ".join(f"{_quote(column)} IS NOT NULL" for column in sources)
+            sql = f"SELECT {selected} FROM {_quote(table.name)} WHERE {populated}"
+            for values in _key_rows(connection, sql):
+                child_key = _identity(values[: len(table.primary_keys)])
+                parent_key = _identity(values[len(table.primary_keys) :])
                 edges[(parent.name, parent_key)].add((table.name, child_key))
     return {row: frozenset(children) for row, children in edges.items()}

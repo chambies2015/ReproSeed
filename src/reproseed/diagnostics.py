@@ -238,6 +238,56 @@ def _input_error(error: Exception, stage: str) -> DiagnosticError:
         ):
             restrictions = (
                 (
+                    "Unsupported schema: composite primary-key arity",
+                    "unsupported_composite_primary_key_arity",
+                    "Composite primary keys must have exactly two components.",
+                ),
+                (
+                    "Unsupported schema: NULL composite primary-key component",
+                    "unsupported_null_composite_primary_key",
+                    "Composite primary-key components must contain no NULL values.",
+                ),
+                (
+                    "Unsupported schema: invalid composite primary-key component storage",
+                    "unsupported_composite_primary_key_value",
+                    "Composite primary-key values must match their INTEGER or TEXT storage family.",
+                ),
+                (
+                    "Unsupported schema: composite key collation",
+                    "unsupported_composite_key_collation",
+                    "Composite key indexes and TEXT column defaults must use BINARY collation.",
+                ),
+                (
+                    "Unsupported schema: descending composite primary-key order",
+                    "unsupported_composite_primary_key_order",
+                    "Composite primary-key index components must be ascending.",
+                ),
+                (
+                    "Unsupported schema: composite primary-key index metadata",
+                    "unsupported_composite_primary_key_metadata",
+                    "Composite keys require a unique nonpartial declared PK index in PK order.",
+                ),
+                (
+                    "Unsupported schema: composite foreign-key cardinality mismatch",
+                    "unsupported_composite_foreign_key_cardinality",
+                    "Foreign-key cardinality must match the full referenced primary key.",
+                ),
+                (
+                    "Unsupported schema: incompatible composite foreign-key component type",
+                    "unsupported_composite_foreign_key_type",
+                    "Composite foreign-key declarations must match each parent's component family.",
+                ),
+                (
+                    "Unsupported schema: invalid composite foreign-key component storage",
+                    "unsupported_composite_foreign_key_value",
+                    "Non-null composite FK values must match each parent's storage family.",
+                ),
+                (
+                    "Unsupported schema: requires INTEGER or TEXT PRIMARY KEY components",
+                    "unsupported_primary_key",
+                    "Tables need supported scalar keys or two exact INTEGER/TEXT PK components.",
+                ),
+                (
                     "Unsupported schema: triggers are not supported",
                     "unsupported_trigger",
                     "Triggers are outside the supported schema subset.",
@@ -253,14 +303,9 @@ def _input_error(error: Exception, stage: str) -> DiagnosticError:
                     "Generated or hidden columns are unsupported.",
                 ),
                 (
-                    "Unsupported schema: composite foreign key in ",
-                    "unsupported_composite_foreign_key",
-                    "Composite foreign keys are unsupported.",
-                ),
-                (
                     "Unsupported schema: foreign key must target ",
                     "unsupported_foreign_key_target",
-                    "Foreign keys must reference a supported INTEGER or TEXT primary key.",
+                    "Foreign keys must reference the full supported primary key in PK order.",
                 ),
                 (
                     "Unsupported schema: foreign-key parent ",
@@ -342,11 +387,6 @@ def _input_error(error: Exception, stage: str) -> DiagnosticError:
                 "unsupported_schema",
                 "Database schema is outside the supported SQLite subset.",
             )
-            if message.endswith(" requires one INTEGER or TEXT PRIMARY KEY"):
-                reason, detail = (
-                    "unsupported_primary_key",
-                    "Each table needs one rowid-alias INTEGER or BINARY TEXT PRIMARY KEY.",
-                )
             for prefix, code, explanation in restrictions:
                 if message.startswith(prefix):
                     reason, detail = code, explanation

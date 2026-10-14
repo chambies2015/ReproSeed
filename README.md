@@ -2,7 +2,7 @@
 
 Smaller fixture. Same specified failure. Independently replayable evidence.
 
-ReproSeed is an M2a prototype of a local Python CLI. It reduces a disposable SQLite
+ReproSeed is an M2b prototype of a local Python CLI. It reduces a disposable SQLite
 fixture to a relationally valid row subset while reconfirming the explicit exit/marker
 contract supplied by the user. It exports a compact fixture, replay assets and evidence.
 It does not infer semantic crash equivalence. Reduction is not anonymization, and the
@@ -32,6 +32,10 @@ exercise [inventory reservations](examples/reservation_overbook/README.md) and
 [cyclic approvals](examples/approval_cycle/README.md).
 The [text-key entitlement example](examples/text_key_entitlements/README.md) exercises
 a separate tenant-scoping defect with mixed INTEGER/TEXT keys and several FK levels.
+The [composite billing example](examples/composite_billing/README.md) uses two-column
+invoice/account keys and detects an invoice falsely marked paid when refunds are added
+to settled payments. Its full fixture has 1,308 rows; `generate.py --small` retains the
+same application defect in eight rows for installed-wheel validation.
 
 Choose a new output directory for every reduction. Copy/move the completed bundle elsewhere
 and replay using the installed CLI; original fixture and example files are unnecessary.
@@ -162,34 +166,39 @@ aborts with exit 130. Existing outputs and supplied files are preserved.
 
 ## Support and limits
 
-SQLite >=3.37; ordinary rowid tables with one exact INTEGER PRIMARY KEY alias or one
-exact declared TEXT PRIMARY KEY using BINARY collation. Type-name case and surrounding
-whitespace are ignored. Inline and table-level TEXT PK declarations, ordinary/STRICT
-tables, empty strings, Unicode and case-sensitive distinct keys are supported. Every
-TEXT PK value must be non-NULL, have SQLite TEXT storage and decode correctly to a Python
-string. Ordinary non-STRICT SQLite schemas may permit NULL primary keys; M2a accepts
-these declarations only when every key in the snapshot is valid.
+SQLite >=3.37; ordinary and STRICT rowid tables with one exact INTEGER PRIMARY KEY alias,
+one exact declared TEXT/BINARY primary key, or exactly two ascending declared PRIMARY KEY
+columns. Each composite component must be exact INTEGER or TEXT, so INTEGER+INTEGER,
+INTEGER+TEXT, TEXT+INTEGER and TEXT+TEXT are supported. Type-name case and surrounding
+whitespace are ignored. Every parent PK component must be non-NULL and stored as its
+declared SQLite integer/text family; text must decode safely to Python str. Nullable
+non-STRICT PK declarations are accepted only when every actual component is valid.
+Empty tables still undergo metadata checks. TEXT comparisons require BINARY on both
+the PK index and the column's default collation.
 
-Single-column FKs must reference a supported declared parent PK. INTEGER parents require
-integer-affinity child columns with actual integer/null values; TEXT parents require exact
-declared TEXT child columns with actual text/null values. The parent's key family selects
-this policy, independently of the child's own PK. Mixed tables, multiple FKs, nullable
-references, cycles, self-references, sparse/negative integer IDs, unrelated/empty tables,
-quoted identifiers, STRICT and INTEGER AUTOINCREMENT are supported. SQLite applies parent
-affinity and collation to FK comparisons; M2a conservatively rejects cross-affinity
-declarations rather than coercing stored keys. See [the architecture](docs/architecture.md).
+Scalar and two-column FKs must reference the full supported parent PK, either implicitly
+or with explicit columns in PK order. The parent's component families select child-column
+policy independently of the child's own PK: INTEGER parents require integer-affinity
+declarations and integer/null storage; TEXT parents require exact TEXT declarations and
+text/null storage. Composite FKs form one complete tuple edge. If any child component is
+NULL, no parent is required and no edge is invented. Mixed tables, multiple FKs, cycles,
+self-references, negative/sparse integers, empty strings, Unicode, quoted identifiers and
+INTEGER AUTOINCREMENT remain supported. SQLite applies parent affinity/collation to FK
+comparisons; ReproSeed rejects cross-affinity declarations instead of coercing keys. See
+[the architecture](docs/architecture.md) and [SQLite FK rules](https://www.sqlite.org/foreignkeys.html).
 
-VARCHAR/CHAR PKs and TEXT FKs, NOCASE/RTRIM/custom TEXT PK collations, NULL/nontext TEXT
-keys, composite/missing PKs, non-alias INTEGER PKs, unsupported FK targets (including
-non-PK UNIQUE columns), WITHOUT ROWID, virtual tables, triggers and generated columns fail
-explicitly. This is a bounded schema subset, not support for every string-keyed SQLite schema.
+Three-or-more-column or missing PKs, composite types other than exact INTEGER/TEXT,
+descending composite components, non-alias scalar INTEGER PKs, NULL/wrong-storage parent
+keys, VARCHAR/CHAR TEXT keys/references, NOCASE/RTRIM/custom TEXT collations, reordered or
+non-PK UNIQUE FK targets, mismatched FK cardinality, WITHOUT ROWID, virtual/shadow tables,
+triggers and generated/hidden columns fail explicitly. This is a bounded schema subset.
 
 The tool opens source read-only and uses SQLite backup, including committed WAL, without
 checkpointing or source writes. Use a disposable local fixture; live production databases
 are outside the workflow. Removal closes over dependent children recursively and never
 uses ON DELETE actions to rewrite retained values. Every candidate gets integrity/FK checks.
 Final VACUUM INTO removes unused pages; retained content may still be sensitive. It can
-change hidden rowids in TEXT-keyed tables. M2a preserves retained declared column values
+change hidden rowids in TEXT-keyed and composite-keyed tables. M2b preserves retained declared column values
 and keys, not hidden rowid identity; three final confirmations of the compact fixture
 remain the authority for whether the configured failure reproduces.
 
@@ -233,5 +242,11 @@ local validation. M1b.2 was accepted at commit `c9cf32ced7f0428385d1daad912d5aa0
 [hosted run 38476866662](https://github.com/chambies2015/ReproSeed/actions/runs/38476866662):
 Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12 all succeeded. Historical
 completion reports retain the observations available when they were written.
-See [M2a completion evidence](docs/m2a-completion.md) for actual local results and limits;
-hosted M2a validation awaits Dan's subsequent review, commit and push.
+See [M2a completion evidence](docs/m2a-completion.md) and
+[M2a.1 repair evidence](docs/m2a1-completion.md) for their historical local results and limits.
+M2a.1 was accepted at commit `d60c79c07ae12666af9572ced69edc3b9523ce17` in
+[hosted run 38572680512](https://github.com/chambies2015/ReproSeed/actions/runs/38572680512):
+Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12 all passed.
+[M2b completion evidence](docs/m2b-completion.md) records this implementation's actual checks;
+hosted M2b acceptance awaits Dan's subsequent review, commit and push. Historical reports
+remain unchanged. M2c and PostgreSQL are future work; this milestone is not a release.

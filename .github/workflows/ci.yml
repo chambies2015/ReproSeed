@@ -167,5 +167,14 @@ jobs:
                    "--examples", "text_key_entitlements", "--small-text-fixture"],
                   cwd=outside, env=environment, check=True, timeout=180,
               )
+              # Exercise the complete composite lifecycle with the genuine
+              # eight-row billing failure rather than repeating the full fixture.
+              subprocess.run(
+                  [str(python), str(repository / "tests" / "milestone_smoke.py"),
+                   "--directory", str(outside / "composite-key-wheel-smoke"),
+                   "--python", str(python), "--cli", str(cli),
+                   "--examples", "composite_billing", "--small-composite-fixture"],
+                  cwd=outside, env=environment, check=True, timeout=180,
+              )
           print("Installed wheel CLI diagnosed, reduced, inspected, and replayed outside the checkout.")
           PY

@@ -1,6 +1,6 @@
 # Engineering guidance
 
-ReproSeed M2a is a local Python 3.12+ CLI with a standard-library-only runtime.
+ReproSeed M2b is a local Python 3.12+ CLI with a standard-library-only runtime.
 Architecture and scope are described in docs/architecture.md and docs/roadmap.md.
 
 ## Module boundaries
@@ -46,9 +46,15 @@ Use synthetic fixtures and real SQLite/subprocess integration tests. Preserve us
 - Quote identifiers, bind values, disable FK actions only on private candidates and validate.
 - Model declared INTEGER rowid-alias or exact TEXT/BINARY primary keys from SQLite metadata.
   TEXT keys must be actual TEXT and non-NULL; do not coerce, fold case or infer types from rows.
+- Model exactly two ascending declared INTEGER/TEXT PK components in table_xinfo PK order,
+  validate the unique nonpartial PK index/key columns and BINARY comparison metadata even
+  for empty tables, and require actual non-NULL integer/text component storage.
+- Treat each FK declaration id as one ordered group targeting the complete parent PK.
+  Composite dependency identity is the full tuple; any NULL child component means no edge.
+  Reject wrong arity, reordered/non-PK targets and unsupported declaration/storage families.
 - Select FK declaration/storage policy from the referenced parent's key family, not the
   child's own primary key. Reject unsupported affinity/collation rather than approximating it.
-- Preserve retained declared values and schema; hidden rowids of TEXT-keyed tables may change
+- Preserve retained declared values and schema; hidden rowids of TEXT/composite-keyed tables may change
   during VACUUM INTO and are never replacement row identities. Reconfirm the compact fixture.
 - Bundle assets are explicit regular files, never recursive collection or implicit secrets.
 - Inspect/replay validate copied payload bytes against the captured manifest before execution.
@@ -78,19 +84,24 @@ uv run mypy
 uv run mypy --platform linux
 uv run --locked python -c "from pathlib import Path; Path('.validation').mkdir(exist_ok=True)"
 uv run pytest --basetemp=.validation/pytest
-uv run pytest tests/test_text_keys.py tests/test_diagnose_cli.py tests/test_diagnostics.py tests/test_realistic_acceptance.py --basetemp=.validation/pytest-focused
-uv run --locked python tests/milestone_smoke.py --directory .validation/m2a-measurements-fresh
+uv run pytest tests/test_composite_keys.py tests/test_text_keys.py tests/test_diagnose_cli.py tests/test_diagnostics.py tests/test_realistic_acceptance.py --basetemp=.validation/pytest-focused
+uv run --locked python tests/milestone_smoke.py --directory .validation/m2b-measurements-fresh
 uv run --locked python tests/compatibility_smoke.py --directory .validation/pre-m1b-v1-fresh
+uv run --locked python tests/compatibility_smoke.py --directory .validation/m2a-text-v1-fresh --history m2a-text
 uv build --no-sources
 ```
 
 Run acceptance tests and install the wheel outside the source import context when changes
 affect the workflow. Use a fresh bundle output; no overwrite shortcut exists.
-Exercise TEXT-key model/reducer regressions, the text-key entitlement example and the
-installed-wheel TEXT-key diagnosis/reduction/inspection/relocated replay smoke for M2a.
+Exercise scalar/composite key model/reducer regressions, all five established applications,
+the composite billing example and installed-wheel TEXT/composite diagnosis, reduction,
+inspection and relocated replay. Use the genuine small generators only for wheel smoke;
+full composite acceptance starts with at least 1,200 rows and targets at most 16 retained.
 The explicit compatibility recipe archives the reviewed pre-M1b commit and uses its source
 to generate a genuine version-1 synthetic bundle before the current reader inspects/replays it.
-Its scratch directory must be new; generated archives, databases and bundles stay ignored.
+The m2a-text history mode separately archives accepted d60c79c07ae12666af9572ced69edc3b9523ce17
+and generates a genuine prior TEXT-key bundle. Scratch directories must be new; generated
+archives, databases and bundles stay ignored. Do not modify historical bundles or reports.
 Exercise default/explicit JSON and text inspection in installed-wheel validation.
 Use deterministic interruption injection at state transitions, plus real SQLite/subprocess
 bundle inspection and relocated replay. Keep real-signal coverage distinct from injected
@@ -98,6 +109,8 @@ KeyboardInterrupt coverage and record the platform on which each actually ran.
 See CONTRIBUTING.md for the complete validation workflow and platform limits.
 
 Accepted M1b.2 evidence is commit c9cf32ced7f0428385d1daad912d5aa01fec6967 and hosted
-run 38476866662, with Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12
-all successful. Preserve historical completion reports. M2a changes stay unstaged and
-uncommitted for Dan; hosted validation requires his subsequent commit and push.
+run 38476866662. Accepted M2a.1 is commit d60c79c07ae12666af9572ced69edc3b9523ce17 and
+hosted run 38572680512. Both passed Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python
+3.12. Preserve historical completion reports. M2b changes stay unstaged and uncommitted
+for Dan; hosted validation requires his subsequent commit and push. Do not implement M2c
+or PostgreSQL, or publish a release, in this milestone.

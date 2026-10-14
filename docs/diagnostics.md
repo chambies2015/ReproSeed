@@ -13,13 +13,21 @@ interruption or a hard nonlaunch blocks completion. Every executed PASS or UNRES
 observation is retained and the remaining confirmations are attempted. All three must
 be TARGET_FAILURE; there is no majority vote.
 
-M2a uses the same `DatabaseModel` for diagnosis, reduction and private bundle validation.
+M2b uses the same `DatabaseModel` for diagnosis, reduction and private bundle validation.
 Exact declared TEXT PRIMARY KEY with a metadata-confirmed BINARY PK index is supported
 alongside the existing INTEGER rowid-alias family, including mixed tables and matching
-parent-family foreign keys. Ordinary schemas with nullable TEXT PK declarations are
-accepted only when actual keys are non-NULL SQLite TEXT that decodes to Python strings.
-FK policy comes from the referenced parent, so the child's own PK can have another family.
-Unsupported collations, NULL TEXT PK values, wrong stored key types and unsupported FK
+parent-family foreign keys. Exactly two ascending PK components of exact INTEGER/TEXT
+declarations are also supported, with each family's storage checked independently and
+all TEXT comparisons BINARY. Empty tables undergo PK index and FK group metadata checks.
+Ordinary schemas with nullable TEXT/composite PK declarations are accepted only when
+actual components are non-NULL and stored as their declared integer/text family, with
+text decoding to Python strings.
+FK policy comes from the referenced parent's ordered components, so the child's own PK can
+have another shape or family. Explicit composite target columns must follow parent PK
+order; implicit references use the complete PK. Any NULL child FK component means no
+parent is required and no dependency edge is created. NULL parent components remain
+unsupported. Unsupported collations, PK arity/order, NULL PK values, wrong stored key types,
+FK cardinality/targets and unsupported FK
 declarations have separate curated diagnostic causes. These expose no key values or raw
 SQLite error details. Schema rejection happens before any executable baseline attempt.
 See [the exact schema subset](architecture.md#supported-schema); diagnostic_version remains 1.
@@ -62,6 +70,14 @@ Curated input causes include `unsupported_text_key_collation`, `unsupported_unav
 `unsupported_primary_key_value`, `unsupported_foreign_key_value` and
 `unsupported_foreign_key_type`. Values and original SQLite details are not included;
 supported TEXT keys complete the same successful structural checks as INTEGER keys.
+Composite causes include `unsupported_composite_primary_key_arity`,
+`unsupported_null_composite_primary_key`, `unsupported_composite_primary_key_value`,
+`unsupported_composite_key_collation`, `unsupported_composite_primary_key_order`,
+`unsupported_composite_primary_key_metadata`, `unsupported_composite_foreign_key_cardinality`,
+`unsupported_composite_foreign_key_type` and `unsupported_composite_foreign_key_value`.
+Alternate/reordered targets use the existing `unsupported_foreign_key_target` cause with
+curated full-PK wording. No component value, arbitrary SQL, process output or path is echoed.
+These checks run before baseline launch and preserve diagnostic JSON version 1.
 Unavailable-collation and malformed-text errors conservatively leave `integrity_valid`
 null because validation may stop before establishing that result; a schema rejection does
 not establish FK validity.

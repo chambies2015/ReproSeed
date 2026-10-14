@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterable, Set
 from dataclasses import dataclass
 from typing import Protocol
 
-from reproseed.sqlite_adapter import RowId
+from reproseed.sqlite_adapter import RowId, row_sort_key
 
 
 class BudgetExhausted(Exception):
@@ -91,7 +91,7 @@ def reduce_rows(
     try:
         while checkpoint.retained:
             retained = checkpoint.retained
-            ordered = sorted(retained)
+            ordered = sorted(retained, key=row_sort_key)
             width = (len(ordered) + groups - 1) // groups
             changed = False
             for offset in range(0, len(ordered), width):

@@ -362,9 +362,9 @@ UNSUPPORTED_SCHEMAS = [
         id="real-pk",
     ),
     pytest.param(
-        "CREATE TABLE private_items(a TEXT,b TEXT,PRIMARY KEY(a,b))",
-        "unsupported_primary_key",
-        id="composite-pk",
+        "CREATE TABLE private_items(a TEXT,b TEXT,c TEXT,PRIMARY KEY(a,b,c))",
+        "unsupported_composite_primary_key_arity",
+        id="three-column-pk",
     ),
     pytest.param(
         "CREATE TABLE private_items(id TEXT PRIMARY KEY) WITHOUT ROWID",
@@ -398,8 +398,8 @@ UNSUPPORTED_SCHEMAS = [
         "CREATE TABLE parent(id TEXT PRIMARY KEY,other TEXT,UNIQUE(id,other));"
         "CREATE TABLE private_items(id TEXT PRIMARY KEY,a TEXT,b TEXT,"
         "FOREIGN KEY(a,b) REFERENCES parent(id,other))",
-        "unsupported_composite_foreign_key",
-        id="composite-fk",
+        "unsupported_foreign_key_target",
+        id="composite-fk-to-non-primary-unique-columns",
     ),
     pytest.param(
         "CREATE TABLE parent(id TEXT PRIMARY KEY COLLATE NOCASE);"

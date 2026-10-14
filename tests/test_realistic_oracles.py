@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -17,11 +18,26 @@ EXAMPLES = (
     ("reservation_overbook", 44, "REPROSEED_RESERVATION_OVERBOOK"),
     ("approval_cycle", 45, "REPROSEED_APPROVAL_CYCLE"),
     ("text_key_entitlements", 46, "REPROSEED_TEXT_KEY_ENTITLEMENTS"),
+    ("composite_billing", 47, "REPROSEED_COMPOSITE_BILLING_FALSE_PAID"),
 )
 
 
 def _run(argv: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=15, check=False)
+    environment = dict(os.environ)
+    # Counterfactual fixes can preserve source size and occur within one second.
+    # Read staged application source afresh instead of reusing timestamp-based bytecode.
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    environment["PYTHONUTF8"] = "1"
+    return subprocess.run(
+        argv,
+        cwd=cwd,
+        env=environment,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=15,
+        check=False,
+    )
 
 
 def _prepare(example: str, directory: Path) -> Path:
@@ -75,11 +91,13 @@ def test_realistic_oracle_target_and_correct_data(
                 'UPDATE "approval steps" SET depends_on_id = NULL '
                 'WHERE id = (SELECT MAX(id) FROM "approval steps")'
             )
-        else:
+        elif example == "text_key_entitlements":
             connection.execute(
                 "UPDATE events SET external_reference = 'independent-gateway-reference' "
                 "WHERE id = (SELECT MAX(id) FROM events)"
             )
+        else:
+            connection.execute("UPDATE refunds SET state = 'pending'")
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
     correct = _oracle(database)
     assert correct.returncode == 0, correct.stdout + correct.stderr
@@ -119,11 +137,13 @@ def test_realistic_oracle_stops_reproducing_when_application_bug_is_fixed(
             "        visiting.remove(step_id)",
             "        visiting.remove(step_id)\n        completed.add(step_id)",
         )
-    else:
+    elif example == "text_key_entitlements":
         source = source.replace("seen: set[str] = set()", "seen: set[tuple[int, str]] = set()")
         source = source.replace(
             "deduplication_key = reference", "deduplication_key = (_tenant, reference)"
         )
+    else:
+        source = source.replace("settled += refunded", "settled -= refunded")
     assert source != application.read_text(encoding="utf-8")
     application.write_text(source, encoding="utf-8")
     fixed = _oracle(database)
@@ -216,6 +236,7 @@ def test_realistic_application_crash_does_not_emit_target(
         "reservation_overbook": "process_reservations",
         "approval_cycle": "validate_workflows",
         "text_key_entitlements": "process_entitlements",
+        "composite_billing": "reconcile_invoices",
     }[example]
     (database.parent / "app.py").write_text(
         f"def {function}(database):\n    raise RuntimeError('Unrelated synthetic crash')\n",
@@ -225,3 +246,87 @@ def test_realistic_application_crash_does_not_emit_target(
     assert crash.returncode not in (0, expected_exit)
     assert marker not in crash.stdout.splitlines()
     assert "Unrelated synthetic crash" in crash.stderr
+
+
+def test_composite_billing_unrelated_decisions_do_not_emit_target(tmp_path: Path) -> None:
+    database = _prepare("composite_billing", tmp_path / "application")
+    application = database.parent / "app.py"
+    source = application.read_text(encoding="utf-8")
+    broken = source.replace(
+        "decisions[key] = line_totals.get(key, 0) == total and settlement.get(key, 0) >= total",
+        "decisions[key] = True",
+    )
+    assert broken != source
+    application.write_text(broken, encoding="utf-8")
+    unrelated = _oracle(database)
+    assert unrelated.returncode == 2, unrelated.stdout + unrelated.stderr
+    assert not unrelated.stdout
+    assert "Unexpected invoice reconciliation discrepancy" in unrelated.stderr
+
+
+def test_composite_billing_pending_refund_is_not_settled_money(tmp_path: Path) -> None:
+    database = _prepare("composite_billing", tmp_path / "application")
+    with closing(sqlite3.connect(database)) as connection, connection:
+        connection.execute(
+            "UPDATE refunds SET state = 'pending' "
+            "WHERE tenant_id = 'tenant-012' AND reference = 'refund-14'"
+        )
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    correct = _oracle(database)
+    assert correct.returncode == 0, correct.stdout + correct.stderr
+    assert not correct.stdout
+    assert not correct.stderr
+
+
+def test_composite_billing_malformed_decision_map_is_not_target(tmp_path: Path) -> None:
+    database = _prepare("composite_billing", tmp_path / "application")
+    application = database.parent / "app.py"
+    source = application.read_text(encoding="utf-8")
+    broken = source.replace("    return decisions", "    return {}")
+    assert broken != source
+    application.write_text(broken, encoding="utf-8")
+    unrelated = _oracle(database)
+    assert unrelated.returncode == 2, unrelated.stdout + unrelated.stderr
+    assert not unrelated.stdout
+    assert "Unexpected invoice decision map" in unrelated.stderr
+
+
+def test_composite_billing_small_fixture_has_real_refund_accounting(tmp_path: Path) -> None:
+    application = tmp_path / "application"
+    application.mkdir()
+    for name in ("app.py", "oracle.py", "generate.py"):
+        shutil.copy2(REPOSITORY / "examples" / "composite_billing" / name, application / name)
+    database = application / "fixture.sqlite3"
+    generated = _run(
+        [sys.executable, str(application / "generate.py"), str(database), "--small"], tmp_path
+    )
+    assert generated.returncode == 0, generated.stdout + generated.stderr
+    with closing(sqlite3.connect(database)) as connection:
+        tables = ("tenants", "accounts", "invoices", "invoice_lines", "payments", "refunds")
+        counts = {
+            table: connection.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+            for table in tables
+        }
+        assert counts == {
+            "tenants": 1,
+            "accounts": 1,
+            "invoices": 1,
+            "invoice_lines": 3,
+            "payments": 1,
+            "refunds": 1,
+        }
+        assert sum(counts.values()) == 8
+        assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        total = connection.execute("SELECT total_cents FROM invoices").fetchone()[0]
+        charged = connection.execute(
+            "SELECT SUM(amount_cents) FROM payments WHERE state = 'settled'"
+        ).fetchone()[0]
+        refunded = connection.execute(
+            "SELECT SUM(amount_cents) FROM refunds WHERE state = 'settled'"
+        ).fetchone()[0]
+        assert charged - refunded < total <= charged + refunded
+    target = _oracle(database)
+    assert target.returncode == 47, target.stdout + target.stderr
+    assert target.stdout.splitlines() == ["REPROSEED_COMPOSITE_BILLING_FALSE_PAID"]
+    assert not target.stderr

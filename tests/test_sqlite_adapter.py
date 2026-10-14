@@ -237,7 +237,7 @@ def test_materialize_empty_database_and_reject_unknown_identities(relational: Pa
     [
         "CREATE TABLE t(value TEXT)",
         "CREATE TABLE t(id VARCHAR PRIMARY KEY)",
-        "CREATE TABLE t(a INTEGER, b INTEGER, PRIMARY KEY(a, b))",
+        "CREATE TABLE t(a INTEGER, b INTEGER, c INTEGER, PRIMARY KEY(a, b, c))",
         "CREATE TABLE t(id INTEGER PRIMARY KEY DESC)",
         "CREATE TABLE t(id INTEGER PRIMARY KEY) WITHOUT ROWID",
         "CREATE TABLE t(id INTEGER PRIMARY KEY, doubled INTEGER GENERATED ALWAYS AS(id*2))",

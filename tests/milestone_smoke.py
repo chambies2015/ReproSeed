@@ -30,6 +30,7 @@ EXAMPLES = {
     "reservation_overbook": (3500, 12),
     "approval_cycle": (1500, 10),
     "text_key_entitlements": (800, 12),
+    "composite_billing": (1200, 16),
 }
 
 
@@ -104,7 +105,12 @@ def specific_application_failure(
     example: str, source_root: Path, database: Path, python: Path, directory: Path
 ) -> None:
     """Check actual app decisions and relational causes without trusting its oracle."""
-    if example not in {"reservation_overbook", "approval_cycle", "text_key_entitlements"}:
+    if example not in {
+        "reservation_overbook",
+        "approval_cycle",
+        "text_key_entitlements",
+        "composite_billing",
+    }:
         return
     decisions = json.loads(
         succeeded(run([str(python), str(source_root / "app.py"), str(database)], directory))
@@ -144,7 +150,7 @@ def specific_application_failure(
             assert len({row[2] for row in cycles}) == 1
             assert all(row[2] == row[3] and decisions[str(row[2])] is True for row in cycles)
             assert connection.execute('SELECT COUNT(*) FROM "approval activity"').fetchone() == (0,)
-        else:
+        elif example == "text_key_entitlements":
             grants = connection.execute(
                 """
                 SELECT event_receipts.id, accounts.tenant_id, events.external_reference,
@@ -171,6 +177,38 @@ def specific_application_failure(
                     accepted_tenants.setdefault(reference, set()).add(tenant)
                 scoped_seen.add((tenant, reference))
             assert suppressed, "No valid grant was suppressed by another tenant's event reference"
+        else:
+            paid = {
+                (decision["tenant_id"], decision["invoice_no"]): decision["paid"]
+                for decision in decisions
+            }
+            invoices = connection.execute(
+                """
+                SELECT invoices.tenant_id, invoices.invoice_no, invoices.total_cents,
+                       COALESCE((SELECT SUM(amount_cents) FROM invoice_lines
+                                 WHERE invoice_lines.tenant_id = invoices.tenant_id
+                                   AND invoice_lines.invoice_no = invoices.invoice_no), 0),
+                       COALESCE((SELECT SUM(amount_cents) FROM payments
+                                 WHERE payments.tenant_id = invoices.tenant_id
+                                   AND payments.invoice_no = invoices.invoice_no
+                                   AND payments.state = 'settled'), 0),
+                       COALESCE((SELECT SUM(refunds.amount_cents) FROM refunds
+                                 JOIN payments ON payments.id = refunds.payment_id
+                                 WHERE payments.tenant_id = invoices.tenant_id
+                                   AND payments.invoice_no = invoices.invoice_no
+                                   AND payments.state = 'settled'
+                                   AND refunds.state = 'settled'), 0)
+                FROM invoices
+                """
+            ).fetchall()
+            assert any(
+                paid[(tenant, number)] is True
+                and total > 0
+                and lines == total
+                and refunds > 0
+                and settled - refunds < total <= settled + refunds
+                for tenant, number, total, lines, settled, refunds in invoices
+            ), "No invoice was falsely marked paid by adding settled refunds"
 
 
 def run(arguments: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -242,6 +280,7 @@ def exercise_example(
     python: Path = Path(sys.executable),
     cli: list[str] | None = None,
     small_text_fixture: bool = False,
+    small_composite_fixture: bool = False,
 ) -> dict[str, Any]:
     """Run one complete real workflow; raise on any contract or row-target failure."""
     directory.mkdir(parents=True, exist_ok=False)
@@ -254,9 +293,10 @@ def exercise_example(
             shutil.copy2(asset, source_root / asset.name)
     source = source_root / "fixture.sqlite3"
     config = source_root / "reproseed.toml"
-    generator_flags = (
-        ["--small"] if small_text_fixture and example == "text_key_entitlements" else []
+    small = (small_text_fixture and example == "text_key_entitlements") or (
+        small_composite_fixture and example == "composite_billing"
     )
+    generator_flags = ["--small"] if small else []
     succeeded(
         run(
             [str(python), str(source_root / "generate.py"), str(source), *generator_flags],
@@ -267,7 +307,7 @@ def exercise_example(
     original_rows = sum(original.counts.values())
     minimum_rows, maximum_rows = EXAMPLES[example]
     if generator_flags:
-        minimum_rows = maximum_rows = 10
+        minimum_rows = maximum_rows = 8 if example == "composite_billing" else 10
     assert original_rows >= minimum_rows
     if example in {"duplicate_export", "threshold"}:
         assert original_rows == minimum_rows
@@ -457,6 +497,11 @@ def main() -> None:
         action="store_true",
         help="Use ten TEXT rows for installed-wheel smoke; full acceptance uses 970 rows.",
     )
+    parser.add_argument(
+        "--small-composite-fixture",
+        action="store_true",
+        help="Use eight genuine billing rows for installed-wheel smoke; full fixture has 1308.",
+    )
     arguments = parser.parse_args()
     directory = arguments.directory.resolve()
     directory.mkdir(parents=True, exist_ok=False)
@@ -480,6 +525,7 @@ def main() -> None:
             python=python,
             cli=cli,
             small_text_fixture=arguments.small_text_fixture,
+            small_composite_fixture=arguments.small_composite_fixture,
         )
         for example in arguments.examples
     ]

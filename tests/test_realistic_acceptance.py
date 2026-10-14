@@ -9,7 +9,8 @@ from milestone_smoke import exercise_example
 
 
 @pytest.mark.parametrize(
-    "example", ["reservation_overbook", "approval_cycle", "text_key_entitlements"]
+    "example",
+    ["reservation_overbook", "approval_cycle", "text_key_entitlements", "composite_billing"],
 )
 def test_realistic_complete_relocated_acceptance(example: str, tmp_path: Path) -> None:
     measured = exercise_example(example, tmp_path / example)
