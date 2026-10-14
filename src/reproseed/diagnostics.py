@@ -89,7 +89,12 @@ class Diagnosis:
 
     @property
     def integrity_valid(self) -> bool | None:
-        # The shared model checks integrity, then FKs, then schema acceptance.
+        # The shared model checks integrity, schema/key policy, then foreign keys.
+        if self.error is not None and self.error.reason in {
+            "unsupported_unavailable_collation",
+            "unsupported_text_encoding",
+        }:
+            return None
         if (
             self.structurally_suitable
             or self.schema_supported is False
@@ -102,7 +107,7 @@ class Diagnosis:
 
     @property
     def foreign_keys_valid(self) -> bool | None:
-        if self.structurally_suitable or self.schema_supported is False:
+        if self.structurally_suitable:
             return True
         return (
             False
@@ -228,6 +233,8 @@ def _input_error(error: Exception, stage: str) -> DiagnosticError:
             message.startswith("Unsupported schema: ")
             or message.startswith("Noninteger primary-key value in ")
             or message.startswith("Noninteger foreign-key value in ")
+            or message.startswith("Nontext primary-key value in ")
+            or message.startswith("Nontext foreign-key value in ")
         ):
             restrictions = (
                 (
@@ -253,7 +260,7 @@ def _input_error(error: Exception, stage: str) -> DiagnosticError:
                 (
                     "Unsupported schema: foreign key must target ",
                     "unsupported_foreign_key_target",
-                    "Foreign keys must reference a supported integer primary key.",
+                    "Foreign keys must reference a supported INTEGER or TEXT primary key.",
                 ),
                 (
                     "Unsupported schema: foreign-key parent ",
@@ -264,6 +271,46 @@ def _input_error(error: Exception, stage: str) -> DiagnosticError:
                     "Unsupported schema: noninteger foreign key in ",
                     "unsupported_foreign_key_type",
                     "Foreign-key columns must have integer affinity.",
+                ),
+                (
+                    "Unsupported schema: nontext foreign key in ",
+                    "unsupported_foreign_key_type",
+                    "Foreign keys to TEXT parents need exactly declared TEXT columns.",
+                ),
+                (
+                    "Unsupported schema: NULL TEXT primary-key value",
+                    "unsupported_null_text_primary_key",
+                    "TEXT primary keys must contain no NULL values in the snapshot.",
+                ),
+                (
+                    "Unsupported schema: TEXT key collation",
+                    "unsupported_text_key_collation",
+                    "TEXT primary-key columns and indexes must use BINARY collation.",
+                ),
+                (
+                    "Unsupported schema: TEXT primary-key collation metadata",
+                    "unsupported_text_key_collation",
+                    "TEXT primary-key collation metadata must establish BINARY comparisons.",
+                ),
+                (
+                    "Unsupported schema: unavailable collation metadata",
+                    "unsupported_unavailable_collation",
+                    "The database requires an unavailable collation; TEXT keys need BINARY.",
+                ),
+                (
+                    "Unsupported schema: malformed TEXT encoding",
+                    "unsupported_text_encoding",
+                    "TEXT keys and schema metadata must decode as valid Unicode strings.",
+                ),
+                (
+                    "Nontext primary-key value in ",
+                    "unsupported_primary_key_value",
+                    "TEXT primary-key values must have actual SQLite TEXT storage class.",
+                ),
+                (
+                    "Nontext foreign-key value in ",
+                    "unsupported_foreign_key_value",
+                    "Non-null foreign keys to TEXT parents must have SQLite TEXT storage class.",
                 ),
                 (
                     "Noninteger foreign-key value in ",
@@ -295,10 +342,10 @@ def _input_error(error: Exception, stage: str) -> DiagnosticError:
                 "unsupported_schema",
                 "Database schema is outside the supported SQLite subset.",
             )
-            if message.endswith(" requires one INTEGER PRIMARY KEY"):
+            if message.endswith(" requires one INTEGER or TEXT PRIMARY KEY"):
                 reason, detail = (
                     "unsupported_primary_key",
-                    "Each table needs one rowid-alias INTEGER PRIMARY KEY.",
+                    "Each table needs one rowid-alias INTEGER or BINARY TEXT PRIMARY KEY.",
                 )
             for prefix, code, explanation in restrictions:
                 if message.startswith(prefix):

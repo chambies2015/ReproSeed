@@ -169,7 +169,7 @@ def test_assets_are_frozen_once_before_baseline_invocations(
 @pytest.mark.parametrize(
     "schema,reason",
     [
-        ("CREATE TABLE items(id TEXT PRIMARY KEY)", "unsupported_primary_key"),
+        ("CREATE TABLE items(id VARCHAR PRIMARY KEY)", "unsupported_primary_key"),
         (
             "CREATE TABLE items(id INTEGER PRIMARY KEY);"
             "CREATE TRIGGER changed AFTER INSERT ON items BEGIN SELECT 1; END;",
@@ -198,7 +198,8 @@ def test_curated_database_errors_do_not_execute_or_expose_paths(
     assert diagnosis.actual_invocations == 0
     assert diagnosis.structurally_suitable is False
     assert diagnosis.integrity_valid is True
-    assert diagnosis.foreign_keys_valid is (False if reason == "foreign_key_violation" else True)
+    # Unsupported schemas stop before the foreign-key check, so no result is established.
+    assert diagnosis.foreign_keys_valid is (False if reason == "foreign_key_violation" else None)
     assert str(tmp_path) not in serialize_diagnosis(diagnosis)
 
 
@@ -216,13 +217,13 @@ def test_schema_identifiers_cannot_reclassify_the_validator_failure(
     tmp_path: Path, table: str
 ) -> None:
     quoted = '"' + table.replace('"', '""') + '"'
-    config = _config(tmp_path, f"CREATE TABLE {quoted}(id TEXT PRIMARY KEY)")
+    config = _config(tmp_path, f"CREATE TABLE {quoted}(id VARCHAR PRIMARY KEY)")
     diagnosis = diagnose(config, allow_exec=True)
     assert diagnosis.exit_code == 2
     assert diagnosis.error is not None and diagnosis.error.reason == "unsupported_primary_key"
     assert diagnosis.schema_supported is False
     assert diagnosis.integrity_valid is True
-    assert diagnosis.foreign_keys_valid is True
+    assert diagnosis.foreign_keys_valid is None
     assert diagnosis.actual_invocations == 0
 
 

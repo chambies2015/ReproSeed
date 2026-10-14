@@ -16,6 +16,7 @@ REPOSITORY = Path(__file__).resolve().parents[1]
 EXAMPLES = (
     ("reservation_overbook", 44, "REPROSEED_RESERVATION_OVERBOOK"),
     ("approval_cycle", 45, "REPROSEED_APPROVAL_CYCLE"),
+    ("text_key_entitlements", 46, "REPROSEED_TEXT_KEY_ENTITLEMENTS"),
 )
 
 
@@ -69,10 +70,15 @@ def test_realistic_oracle_target_and_correct_data(
         connection.execute("PRAGMA foreign_keys = ON")
         if example == "reservation_overbook":
             connection.execute("UPDATE stock_lots SET capacity = 100")
-        else:
+        elif example == "approval_cycle":
             connection.execute(
                 'UPDATE "approval steps" SET depends_on_id = NULL '
                 'WHERE id = (SELECT MAX(id) FROM "approval steps")'
+            )
+        else:
+            connection.execute(
+                "UPDATE events SET external_reference = 'independent-gateway-reference' "
+                "WHERE id = (SELECT MAX(id) FROM events)"
             )
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
     correct = _oracle(database)
@@ -108,10 +114,15 @@ def test_realistic_oracle_stops_reproducing_when_application_bug_is_fixed(
             "                    available[lot_id] -= quantity\n"
             "    return decisions",
         )
-    else:
+    elif example == "approval_cycle":
         source = source.replace("        completed.add(step_id)\n", "", 1).replace(
             "        visiting.remove(step_id)",
             "        visiting.remove(step_id)\n        completed.add(step_id)",
+        )
+    else:
+        source = source.replace("seen: set[str] = set()", "seen: set[tuple[int, str]] = set()")
+        source = source.replace(
+            "deduplication_key = reference", "deduplication_key = (_tenant, reference)"
         )
     assert source != application.read_text(encoding="utf-8")
     application.write_text(source, encoding="utf-8")
@@ -161,12 +172,51 @@ def test_approval_three_node_cycle_is_an_unrelated_defect(tmp_path: Path) -> Non
     assert "Unexpected workflow validation discrepancy" in unrelated.stderr
 
 
+def test_text_entitlement_same_tenant_duplicate_is_correctly_suppressed(tmp_path: Path) -> None:
+    database = _prepare("text_key_entitlements", tmp_path / "application")
+    with closing(sqlite3.connect(database)) as connection, connection:
+        # Give the second duplicate the first event's account and entitlement.
+        # Both now belong to the same tenant, where suppression is intentional.
+        first, last = connection.execute(
+            "SELECT id, account_id, entitlement_id FROM events "
+            "WHERE external_reference = 'gateway-delivery-7f36' ORDER BY id"
+        ).fetchall()
+        connection.execute(
+            "UPDATE events SET account_id = ?, entitlement_id = ? WHERE id = ?",
+            (first[1], first[2], last[0]),
+        )
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    correct = _oracle(database)
+    assert correct.returncode == 0, correct.stdout + correct.stderr
+    assert not correct.stdout
+    assert not correct.stderr
+
+
+def test_text_entitlement_unrelated_missing_grants_do_not_emit_target(tmp_path: Path) -> None:
+    database = _prepare("text_key_entitlements", tmp_path / "application")
+    application = database.parent / "app.py"
+    source = application.read_text(encoding="utf-8")
+    broken = source.replace(
+        "decisions[receipt] = deduplication_key not in seen", "decisions[receipt] = False"
+    )
+    assert broken != source
+    application.write_text(broken, encoding="utf-8")
+    unrelated = _oracle(database)
+    assert unrelated.returncode == 2, unrelated.stdout + unrelated.stderr
+    assert not unrelated.stdout
+    assert "Unexpected entitlement processing discrepancy" in unrelated.stderr
+
+
 @pytest.mark.parametrize(("example", "expected_exit", "marker"), EXAMPLES)
 def test_realistic_application_crash_does_not_emit_target(
     tmp_path: Path, example: str, expected_exit: int, marker: str
 ) -> None:
     database = _prepare(example, tmp_path / "application")
-    function = "process_reservations" if example == "reservation_overbook" else "validate_workflows"
+    function = {
+        "reservation_overbook": "process_reservations",
+        "approval_cycle": "validate_workflows",
+        "text_key_entitlements": "process_entitlements",
+    }[example]
     (database.parent / "app.py").write_text(
         f"def {function}(database):\n    raise RuntimeError('Unrelated synthetic crash')\n",
         encoding="utf-8",

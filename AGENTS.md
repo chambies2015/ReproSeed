@@ -1,6 +1,6 @@
 # Engineering guidance
 
-ReproSeed M1b.2 is a local Python 3.12+ CLI with a standard-library-only runtime.
+ReproSeed M2a is a local Python 3.12+ CLI with a standard-library-only runtime.
 Architecture and scope are described in docs/architecture.md and docs/roadmap.md.
 
 ## Module boundaries
@@ -44,6 +44,12 @@ Use synthetic fixtures and real SQLite/subprocess integration tests. Preserve us
 - A second interruption during invocation accounting recovery must bypass search salvage and
   abort rather than publish incomplete execution accounting.
 - Quote identifiers, bind values, disable FK actions only on private candidates and validate.
+- Model declared INTEGER rowid-alias or exact TEXT/BINARY primary keys from SQLite metadata.
+  TEXT keys must be actual TEXT and non-NULL; do not coerce, fold case or infer types from rows.
+- Select FK declaration/storage policy from the referenced parent's key family, not the
+  child's own primary key. Reject unsupported affinity/collation rather than approximating it.
+- Preserve retained declared values and schema; hidden rowids of TEXT-keyed tables may change
+  during VACUUM INTO and are never replacement row identities. Reconfirm the compact fixture.
 - Bundle assets are explicit regular files, never recursive collection or implicit secrets.
 - Inspect/replay validate copied payload bytes against the captured manifest before execution.
 - Replay sources every fresh invocation from one verified private payload, never originals.
@@ -72,14 +78,16 @@ uv run mypy
 uv run mypy --platform linux
 uv run --locked python -c "from pathlib import Path; Path('.validation').mkdir(exist_ok=True)"
 uv run pytest --basetemp=.validation/pytest
-uv run pytest tests/test_diagnose_cli.py tests/test_diagnostics.py tests/test_realistic_acceptance.py --basetemp=.validation/pytest-focused
-uv run --locked python tests/milestone_smoke.py --directory .validation/m1b2-measurements-fresh
+uv run pytest tests/test_text_keys.py tests/test_diagnose_cli.py tests/test_diagnostics.py tests/test_realistic_acceptance.py --basetemp=.validation/pytest-focused
+uv run --locked python tests/milestone_smoke.py --directory .validation/m2a-measurements-fresh
 uv run --locked python tests/compatibility_smoke.py --directory .validation/pre-m1b-v1-fresh
 uv build --no-sources
 ```
 
 Run acceptance tests and install the wheel outside the source import context when changes
 affect the workflow. Use a fresh bundle output; no overwrite shortcut exists.
+Exercise TEXT-key model/reducer regressions, the text-key entitlement example and the
+installed-wheel TEXT-key diagnosis/reduction/inspection/relocated replay smoke for M2a.
 The explicit compatibility recipe archives the reviewed pre-M1b commit and uses its source
 to generate a genuine version-1 synthetic bundle before the current reader inspects/replays it.
 Its scratch directory must be new; generated archives, databases and bundles stay ignored.
@@ -88,3 +96,8 @@ Use deterministic interruption injection at state transitions, plus real SQLite/
 bundle inspection and relocated replay. Keep real-signal coverage distinct from injected
 KeyboardInterrupt coverage and record the platform on which each actually ran.
 See CONTRIBUTING.md for the complete validation workflow and platform limits.
+
+Accepted M1b.2 evidence is commit c9cf32ced7f0428385d1daad912d5aa01fec6967 and hosted
+run 38476866662, with Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12
+all successful. Preserve historical completion reports. M2a changes stay unstaged and
+uncommitted for Dan; hosted validation requires his subsequent commit and push.

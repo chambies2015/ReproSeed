@@ -13,13 +13,24 @@ interruption or a hard nonlaunch blocks completion. Every executed PASS or UNRES
 observation is retained and the remaining confirmations are attempted. All three must
 be TARGET_FAILURE; there is no majority vote.
 
+M2a uses the same `DatabaseModel` for diagnosis, reduction and private bundle validation.
+Exact declared TEXT PRIMARY KEY with a metadata-confirmed BINARY PK index is supported
+alongside the existing INTEGER rowid-alias family, including mixed tables and matching
+parent-family foreign keys. Ordinary schemas with nullable TEXT PK declarations are
+accepted only when actual keys are non-NULL SQLite TEXT that decodes to Python strings.
+FK policy comes from the referenced parent, so the child's own PK can have another family.
+Unsupported collations, NULL TEXT PK values, wrong stored key types and unsupported FK
+declarations have separate curated diagnostic causes. These expose no key values or raw
+SQLite error details. Schema rejection happens before any executable baseline attempt.
+See [the exact schema subset](architecture.md#supported-schema); diagnostic_version remains 1.
+
 | Field | Meaning |
 | --- | --- |
 | `diagnostic_version` | Integer 1; independent diagnostic format |
 | `mode` | `static` or `baseline` as explicitly requested |
 | `snapshot_acquired` | Consistent private read-only-source backup completed |
 | `schema_supported` | true after shared model validation; false for recognized unsupported schema; null when not established |
-| `integrity_valid`, `foreign_keys_valid` | true for successful model validation or a recognized schema rejection after prior validation; false for an exact failed-check error; null when not established; the shared model checks integrity, then FKs, then schema |
+| `integrity_valid`, `foreign_keys_valid` | true for successful corresponding checks; false for an exact failed-check error; null when not established; the model checks integrity, schema/storage/dependencies, then FK consistency, so schema rejection leaves FK validity untested |
 | `assets_validated` | Explicit files passed checks and were copied privately |
 | `structurally_suitable` | Snapshot/model validation completed successfully |
 | `table_counts`, `total_rows` | Sorted user-table counts and their sum; empty/zero if model validation did not complete |
@@ -45,6 +56,15 @@ comes from `run_oracle` unchanged. `reason_code` maps its actual reason to a sta
 `missing_exact_marker`, `marker_zero_exit_contradiction`, `process_signal`, `timeout`,
 `output_limit`, `output_read_error`, `launch_error` or `staging_error`. A future unmapped
 reason is labeled `unrecognized_reason`, without changing its classification.
+
+Curated input causes include `unsupported_text_key_collation`, `unsupported_unavailable_collation`,
+`unsupported_null_text_primary_key`, `unsupported_text_encoding`,
+`unsupported_primary_key_value`, `unsupported_foreign_key_value` and
+`unsupported_foreign_key_type`. Values and original SQLite details are not included;
+supported TEXT keys complete the same successful structural checks as INTEGER keys.
+Unavailable-collation and malformed-text errors conservatively leave `integrity_valid`
+null because validation may stop before establishing that result; a schema rejection does
+not establish FK validity.
 
 Exit codes are 0 for successful static checks or a confirmed requested baseline, 1 for
 an executable-mode baseline not established, 2 for invalid configuration/schema/input,

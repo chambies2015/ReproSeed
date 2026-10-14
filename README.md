@@ -2,7 +2,7 @@
 
 Smaller fixture. Same specified failure. Independently replayable evidence.
 
-ReproSeed is an M1b.2 prototype of a local Python CLI. It reduces a disposable SQLite
+ReproSeed is an M2a prototype of a local Python CLI. It reduces a disposable SQLite
 fixture to a relationally valid row subset while reconfirming the explicit exit/marker
 contract supplied by the user. It exports a compact fixture, replay assets and evidence.
 It does not infer semantic crash equivalence. Reduction is not anonymization, and the
@@ -30,6 +30,8 @@ marker. The intended essential case has one owner, two projects and two entries.
 independent numeric-threshold example lives in examples/threshold/. More demanding examples
 exercise [inventory reservations](examples/reservation_overbook/README.md) and
 [cyclic approvals](examples/approval_cycle/README.md).
+The [text-key entitlement example](examples/text_key_entitlements/README.md) exercises
+a separate tenant-scoping defect with mixed INTEGER/TEXT keys and several FK levels.
 
 Choose a new output directory for every reduction. Copy/move the completed bundle elsewhere
 and replay using the installed CLI; original fixture and example files are unnecessary.
@@ -160,18 +162,36 @@ aborts with exit 130. Existing outputs and supplied files are preserved.
 
 ## Support and limits
 
-SQLite >=3.37; ordinary rowid tables with one exact INTEGER PRIMARY KEY alias; single
-integer-affinity FK columns referencing those PKs with actual integer/null stored values.
-Sparse/negative IDs, nullable references, cycles, self-references, unrelated/empty tables,
-quoted identifiers, STRICT and AUTOINCREMENT are supported. Composite/missing PKs,
-non-alias descending PKs, unsupported FK targets/types, WITHOUT ROWID, virtual tables,
-triggers and generated columns fail explicitly. See docs/architecture.md for exact semantics.
+SQLite >=3.37; ordinary rowid tables with one exact INTEGER PRIMARY KEY alias or one
+exact declared TEXT PRIMARY KEY using BINARY collation. Type-name case and surrounding
+whitespace are ignored. Inline and table-level TEXT PK declarations, ordinary/STRICT
+tables, empty strings, Unicode and case-sensitive distinct keys are supported. Every
+TEXT PK value must be non-NULL, have SQLite TEXT storage and decode correctly to a Python
+string. Ordinary non-STRICT SQLite schemas may permit NULL primary keys; M2a accepts
+these declarations only when every key in the snapshot is valid.
+
+Single-column FKs must reference a supported declared parent PK. INTEGER parents require
+integer-affinity child columns with actual integer/null values; TEXT parents require exact
+declared TEXT child columns with actual text/null values. The parent's key family selects
+this policy, independently of the child's own PK. Mixed tables, multiple FKs, nullable
+references, cycles, self-references, sparse/negative integer IDs, unrelated/empty tables,
+quoted identifiers, STRICT and INTEGER AUTOINCREMENT are supported. SQLite applies parent
+affinity and collation to FK comparisons; M2a conservatively rejects cross-affinity
+declarations rather than coercing stored keys. See [the architecture](docs/architecture.md).
+
+VARCHAR/CHAR PKs and TEXT FKs, NOCASE/RTRIM/custom TEXT PK collations, NULL/nontext TEXT
+keys, composite/missing PKs, non-alias INTEGER PKs, unsupported FK targets (including
+non-PK UNIQUE columns), WITHOUT ROWID, virtual tables, triggers and generated columns fail
+explicitly. This is a bounded schema subset, not support for every string-keyed SQLite schema.
 
 The tool opens source read-only and uses SQLite backup, including committed WAL, without
 checkpointing or source writes. Use a disposable local fixture; live production databases
 are outside the workflow. Removal closes over dependent children recursively and never
 uses ON DELETE actions to rewrite retained values. Every candidate gets integrity/FK checks.
-Final VACUUM INTO removes unused pages; retained content may still be sensitive.
+Final VACUUM INTO removes unused pages; retained content may still be sensitive. It can
+change hidden rowids in TEXT-keyed tables. M2a preserves retained declared column values
+and keys, not hidden rowid identity; three final confirmations of the compact fixture
+remain the authority for whether the configured failure reproduces.
 
 --allow-exec acknowledges that configured code runs with your OS permissions and inherited
 environment. Temporary directories are not a sandbox. Read [SECURITY.md](SECURITY.md) before
@@ -208,5 +228,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md), [architecture](docs/architecture.md),
 and [M1b.1 evidence](docs/m1b1-completion.md).
 The [M1b.1.1 cancellation repair evidence](docs/m1b1-1-completion.md) distinguishes injected
 boundary tests from platform-specific real-signal tests and records their limits.
-See [M1b.2 completion evidence](docs/m1b2-completion.md) for the new fixtures, diagnostics and
-local validation. M1b.2 hosted CI remains pending Dan's review, commit and push.
+See [M1b.2 completion evidence](docs/m1b2-completion.md) for its fixtures, diagnostics and
+local validation. M1b.2 was accepted at commit `c9cf32ced7f0428385d1daad912d5aa01fec6967` in
+[hosted run 38476866662](https://github.com/chambies2015/ReproSeed/actions/runs/38476866662):
+Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12 all succeeded. Historical
+completion reports retain the observations available when they were written.
+See [M2a completion evidence](docs/m2a-completion.md) for actual local results and limits;
+hosted M2a validation awaits Dan's subsequent review, commit and push.

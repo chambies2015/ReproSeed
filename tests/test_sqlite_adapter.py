@@ -236,7 +236,7 @@ def test_materialize_empty_database_and_reject_unknown_identities(relational: Pa
     "script",
     [
         "CREATE TABLE t(value TEXT)",
-        "CREATE TABLE t(id TEXT PRIMARY KEY)",
+        "CREATE TABLE t(id VARCHAR PRIMARY KEY)",
         "CREATE TABLE t(a INTEGER, b INTEGER, PRIMARY KEY(a, b))",
         "CREATE TABLE t(id INTEGER PRIMARY KEY DESC)",
         "CREATE TABLE t(id INTEGER PRIMARY KEY) WITHOUT ROWID",
@@ -297,8 +297,8 @@ def test_noninteger_fk_values_are_rejected_even_when_fk_check_passes(tmp_path: P
         INSERT INTO child VALUES(2, X'31');
         """,
     )
-    # Foreign-key checking must reject this invalid blob link before modeling can use it.
-    with pytest.raises(DatabaseError, match="foreign_key_check"):
+    # Model storage validation rejects a BLOB before any link can become a row edge.
+    with pytest.raises(DatabaseError, match="Noninteger foreign-key value"):
         DatabaseModel.from_database(source)
     # TEXT affinity with '1' passes SQLite's parent-affinity comparison, but is unsupported.
     alternate = create(

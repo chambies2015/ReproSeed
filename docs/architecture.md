@@ -1,4 +1,4 @@
-# M1b.2 architecture
+# M2a architecture
 
 The contract is: smaller fixture, same specified failure, independently replayable evidence.
 "Same" is the configured exit/marker contract. ReproSeed does not infer semantic equivalence
@@ -10,8 +10,11 @@ between arbitrary crashes. The runtime uses Python 3.12+ standard-library module
    Validate fields, portable names and explicit assets before launching code.
 2. Open the source using mode=ro and acquire a private backup, including committed WAL.
    Incremental backup callbacks enforce a five-second deadline for lock retries/restarts.
-3. Validate structural integrity and foreign keys, inspect schema metadata and construct
-   stable `(table, declared integer primary key)` identities plus reverse FK edges.
+3. Validate structural integrity, inspect schema/storage metadata and construct
+   stable `(table, declared primary key)` identities plus reverse FK edges. Each table's
+   metadata selects its integer or text key family; stored values never select the family.
+   Check foreign-key consistency after schema/storage acceptance so unsupported key
+   declarations and values produce their specific errors before relational validation.
 4. Confirm baseline three times, each using fresh staged database/assets. Abort on any
    outcome other than TARGET_FAILURE.
 5. Remove deterministic chunks, then refine down to single-row seeds. Compute recursive
@@ -35,25 +38,68 @@ normal WAL shared-memory sidecar. An arbitrary oracle is not constrained by this
 ## Supported schema
 
 SQLite >=3.37 is required for table_list metadata. Supported user tables are ordinary rowid
-tables with exactly one declared INTEGER PRIMARY KEY that aliases rowid. STRICT and
-AUTOINCREMENT tables are supported. Primary keys may be negative, sparse or zero. Tables
-can be empty or unrelated. Identifiers are quoted, including embedded quotes.
+tables with exactly one declared PK in one of two families:
 
-Foreign keys must be single columns with integer affinity (declared type contains INT),
-referencing the supported parent's declared PK explicitly or implicitly. Non-null actual
-stored FK values must be integers, even when SQLite comparison/coercion would accept another
-storage type. Nullable references, self-references and cycles are supported. A parent removal
+| Family | Declaration and metadata | Actual stored values |
+| --- | --- | --- |
+| INTEGER | Exact declared INTEGER; aliases rowid, established by absence of a separate PK index | Integers; negative, sparse and zero keys supported |
+| TEXT | Exact declared TEXT; single-column PK index established by index_list/index_xinfo, with BINARY comparison | Non-NULL SQLite TEXT that decodes correctly to Python strings |
+
+Type-name case and surrounding whitespace are ignored; VARCHAR/CHAR and other text-affinity
+spellings are outside M2a. Inline and table-level single-column TEXT PKs are supported, with
+or without explicit NOT NULL. An ordinary non-STRICT SQLite PK can permit NULL; this schema
+is accepted only when every snapshot PK value is non-NULL. STRICT tables are supported,
+as is AUTOINCREMENT on an INTEGER rowid alias. Empty tables, empty strings, Unicode,
+SQL quotes, embedded NULs and case-sensitive distinct text keys are supported. Identifiers
+are quoted, including embedded quotes. See SQLite's [CREATE TABLE rules](https://www.sqlite.org/lang_createtable.html).
+
+TEXT equality uses exact string identity, with no coercion, case folding or Unicode
+normalization. The declared PK index and its key-column collation are checked using SQLite
+[index_list and index_xinfo metadata](https://www.sqlite.org/pragma.html#pragma_index_xinfo).
+An empty isolated in-memory schema probe derives the column's default collation through
+a plain index, since a table-level PK can override the column collation. Both must be BINARY;
+the adapter delegates this to SQLite instead of parsing CREATE TABLE with regular expressions.
+NOCASE, RTRIM, custom collations and unsupported PK index metadata are rejected explicitly.
+This restriction makes exact text dependency identities agree with the supported BINARY
+comparison semantics; it does not approximate arbitrary SQLite comparisons. SQLite describes
+its [storage classes, affinity and collations](https://www.sqlite.org/datatype3.html).
+
+Foreign keys must be single columns referencing the supported parent's declared PK,
+explicitly or implicitly. The parent family determines the policy, independently of the
+child table's PK: INTEGER parents require integer-affinity child columns (declared type
+contains INT) and actual integer or NULL values; TEXT parents require exact declared TEXT
+child columns and actual TEXT or NULL values that decode correctly. An INTEGER-keyed child
+may reference a TEXT parent and a TEXT-keyed child may reference an INTEGER parent. Multiple
+FKs, nullable references, self-references, mixed-family chains and cycles are supported.
+SQLite [uses the parent's affinity and collation for FK equality](https://www.sqlite.org/foreignkeys.html#fk_basics);
+M2a conservatively rejects cross-affinity declarations and unsupported parent collations
+rather than changing values or constructing incomplete dependency edges. A parent removal
 also removes every dependent child recursively, irrespective of ON DELETE actions. Retained
 values are never changed to NULL or rewritten by cascading actions.
 
-Missing/composite/noninteger PKs, descending INTEGER PRIMARY KEY forms that do not alias
-rowid, unsupported FK types/targets/composites, WITHOUT ROWID tables, virtual/shadow tables,
-triggers and generated/hidden columns fail explicitly. Internal SQLite tables are excluded
-from row reduction. Declared table/index/view SQL and relevant metadata are preserved,
+Missing/composite PKs, BLOB/REAL/other declared PK types, NULL or non-TEXT TEXT keys,
+descending INTEGER PRIMARY KEY forms that do not alias rowid, unsupported FK declarations,
+non-PK UNIQUE FK targets, composite FKs, WITHOUT ROWID tables, virtual/shadow tables,
+triggers and generated/hidden columns fail explicitly. Malformed text and unavailable custom
+collations produce handled database errors. Internal SQLite tables are excluded from row
+reduction. Declared table/index/view SQL and relevant metadata are preserved,
 including user_version, application_id, page size, encoding, auto_vacuum and sqlite_sequence.
 Views/indexes are preserved, not silently dropped. Application dependencies such as custom
 SQLite functions/collations may cause validation or private construction to fail and are not
 automatically loaded. Arbitrary SQLite schemas are deferred.
+
+Row identities are `tuple[str, int | str]`. A table has one metadata-established key family,
+so deterministic table/key ordering never compares an integer with a string within one
+table and preserves the existing integer ordering. Candidate-cache identity uses these
+uncoerced declared values; text `"42"` and integer `42` are distinct. Reports record counts
+and confirmation evidence, not individual retained identities; configuration, bundle,
+report, replay and diagnostic formats remain version 1.
+
+M2a preserves retained declared column values and keys, not hidden rowid identity. TEXT
+PKs are separate from hidden rowids, which [SQLite may change during VACUUM](https://www.sqlite.org/rowidtable.html).
+The reducer never substitutes hidden rowids for text keys. Three fresh final confirmations
+of the exact VACUUM INTO output remain authoritative for the compact fixture's failure;
+rowid-sensitive application behavior is not presumed to survive compaction.
 
 ## Oracle outcomes
 
@@ -138,7 +184,11 @@ interruption during counter recovery sets accounting completeness false and exit
 Missing result metadata is never invented. JSON remains parseable for invalid inputs and
 handled interruption; curated cause codes avoid echoing source paths or configuration
 secrets. Text escapes terminal controls and explains why an exit code alone is insufficient.
-No bundle or evidence file is created beside user inputs.
+No bundle or evidence file is created beside user inputs. Database checks run in the order
+integrity, schema/storage/dependency acceptance, then foreign-key consistency. A schema
+rejection after a completed integrity check leaves FK validity untested. Unavailable custom
+collation or malformed-text errors can prevent that check from establishing a result;
+diagnosis conservatively leaves integrity validity untested for those causes.
 
 Version-1 evidence validation checks required typed fields and nested records, supported
 outcomes/termination reasons, nonnegative finite durations, table-name/count consistency,

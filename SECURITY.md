@@ -15,6 +15,14 @@ and copied afresh with the database for each attempt. Diagnostic JSON/text omit 
 paths, argv and marker values, rows, raw process output and inherited environment values.
 Table names and fixed diagnostic causes remain visible; text escapes terminal controls.
 
+The shared schema model supports exact INTEGER rowid-alias and exact TEXT/BINARY primary
+keys. Every TEXT PK must be a non-NULL stored TEXT value that decodes to a Python string;
+ordinary SQLite declarations that permit NULL are accepted only for snapshots with valid
+actual keys. TEXT references require stored TEXT or NULL in exact declared TEXT columns.
+INTEGER references retain integer-affinity declarations and stored integer or NULL values.
+The referenced parent's family determines this check. Unsupported collations, malformed
+text and cross-affinity declarations are rejected; keys are never normalized to force support.
+
 ReproSeed itself opens the source read-only, snapshots with the SQLite backup API and
 issues no source writes, checkpoint, VACUUM or journal-mode changes. A read-only WAL
 connection can use SQLite's normal shared-memory sidecar. An arbitrary oracle can still
@@ -79,6 +87,11 @@ markers and diagnostic reasons can disclose sensitive information. Private searc
 and candidates contain source data. They are temporary, not securely erased. Final VACUUM
 INTO compaction removes unused pages from the exported fixture, but this does not certify
 that retained data is safe to share. Review every artifact before distributing a bundle.
+TEXT-keyed tables do not alias their declared keys to SQLite's hidden rowid. VACUUM INTO
+may change those hidden rowids. Declared retained values and keys are preserved; hidden
+rowid identity is outside M2a's preservation contract. Publication still requires three
+fresh target confirmations of the exact compact fixture, including any rowid-sensitive
+application behavior.
 
 Only explicitly named regular files under the configuration root are included. Traversal,
 symlinks, junctions and recursive directory collection are rejected. This avoids implicit

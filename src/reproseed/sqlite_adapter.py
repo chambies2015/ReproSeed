@@ -10,8 +10,11 @@ from collections.abc import Iterable, Set
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
-RowId = tuple[str, int]
+Key = int | str
+KeyFamily = Literal["INTEGER", "TEXT"]
+RowId = tuple[str, Key]
 
 
 class DatabaseError(ValueError):
@@ -91,12 +94,25 @@ def snapshot(source: Path, destination: Path, timeout_seconds: float = 5.0) -> N
         raise DatabaseError(f"Snapshot acquisition failed: {exc}") from exc
 
 
-def _validate_connection(connection: sqlite3.Connection) -> None:
-    results = connection.execute("PRAGMA integrity_check").fetchall()
+def _validate_integrity(connection: sqlite3.Connection) -> None:
+    try:
+        results = connection.execute("PRAGMA integrity_check").fetchall()
+    except sqlite3.Error as exc:
+        if "no such collation sequence" in str(exc):
+            raise DatabaseError("Unsupported schema: unavailable collation metadata") from exc
+        raise
     if results != [("ok",)]:
         raise DatabaseError(f"Database integrity_check failed ({len(results)} reported problems)")
+
+
+def _validate_foreign_keys(connection: sqlite3.Connection) -> None:
     if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
         raise DatabaseError("Database foreign_key_check failed: foreign-key violations exist")
+
+
+def _validate_connection(connection: sqlite3.Connection) -> None:
+    _validate_integrity(connection)
+    _validate_foreign_keys(connection)
 
 
 def validate_database(path: Path) -> None:
@@ -128,6 +144,7 @@ def compact(source: Path, destination: Path) -> None:
 class _Table:
     name: str
     primary_key: str
+    key_family: KeyFamily
     column_types: dict[str, str]
 
 
@@ -143,18 +160,27 @@ class DatabaseModel:
     def from_database(cls, path: Path) -> DatabaseModel:
         try:
             with closing(_readonly(path)) as connection:
-                _validate_connection(connection)
+                _validate_integrity(connection)
                 tables = _read_tables(connection)
                 rows: list[RowId] = []
                 for table in tables:
-                    sql = f"SELECT {_quote(table.primary_key)} FROM {_quote(table.name)} ORDER BY 1"
-                    for (value,) in connection.execute(sql):
-                        if not isinstance(value, int):
-                            raise DatabaseError(f"Noninteger primary-key value in {table.name!r}")
+                    _validate_key_storage(connection, table, table.primary_key, primary=True)
+                    sql = (
+                        f"SELECT {_quote(table.primary_key)} FROM {_quote(table.name)} "
+                        "ORDER BY 1 COLLATE BINARY"
+                    )
+                    for (value,) in _key_rows(connection, sql):
+                        if not isinstance(value, int | str):
+                            raise DatabaseError("Invalid primary-key value")
                         rows.append((table.name, value))
                 dependents = _read_dependencies(connection, tables)
+                _validate_foreign_keys(connection)
                 return cls(tuple(rows), tables, dependents)
+        except UnicodeError as exc:
+            raise DatabaseError("Unsupported schema: malformed TEXT encoding") from exc
         except (sqlite3.Error, OSError) as exc:
+            if "Could not decode" in str(exc):
+                raise DatabaseError("Unsupported schema: malformed TEXT encoding") from exc
             raise DatabaseError(f"Database modeling failed: {exc}") from exc
 
     def counts(self, retained: Iterable[RowId] | None = None) -> dict[str, int]:
@@ -196,7 +222,7 @@ class DatabaseModel:
                     for table in self._tables:
                         sql = (
                             f"DELETE FROM {_quote(table.name)} "
-                            f"WHERE {_quote(table.primary_key)} = ?"
+                            f"WHERE {_quote(table.primary_key)} COLLATE BINARY = ?"
                         )
                         deleted = (
                             (key,)
@@ -233,17 +259,112 @@ def _read_tables(connection: sqlite3.Connection) -> tuple[_Table, ...]:
         if any(column[6] != 0 for column in columns):
             raise DatabaseError(f"Unsupported schema: generated or hidden columns in {name!r}")
         primary = [column for column in columns if column[5] != 0]
-        if len(primary) != 1 or primary[0][2].strip().upper() != "INTEGER":
-            raise DatabaseError(f"Unsupported schema: {name!r} requires one INTEGER PRIMARY KEY")
+        if len(primary) != 1 or primary[0][2].strip().upper() not in {"INTEGER", "TEXT"}:
+            raise DatabaseError(
+                f"Unsupported schema: {name!r} requires one INTEGER or TEXT PRIMARY KEY"
+            )
+        family: KeyFamily = "TEXT" if primary[0][2].strip().upper() == "TEXT" else "INTEGER"
         # INTEGER PRIMARY KEY DESC is not a rowid alias and can contain NULL/noninteger keys.
-        indexes = connection.execute(f"PRAGMA main.index_list({_quote(name)})")
-        if any(index[3] == "pk" for index in indexes):
+        indexes = connection.execute(f"PRAGMA main.index_list({_quote(name)})").fetchall()
+        primary_indexes = [index for index in indexes if index[3] == "pk"]
+        if family == "INTEGER" and primary_indexes:
             raise DatabaseError(
                 f"Unsupported schema: non-rowid-alias INTEGER primary key in {name!r}"
             )
+        if family == "TEXT":
+            if len(primary_indexes) != 1:
+                raise DatabaseError("Unsupported schema: TEXT primary-key index metadata")
+            index = primary_indexes[0]
+            if index[2] != 1 or index[4] != 0:
+                raise DatabaseError("Unsupported schema: TEXT primary-key index metadata")
+            _binary_key_index(connection, index[1], primary[0][0], primary[0][1])
+            _binary_column_collation(connection, name, primary[0][1])
         types = {column[1]: column[2] for column in columns}
-        tables.append(_Table(name, primary[0][1], types))
+        tables.append(_Table(name, primary[0][1], family, types))
     return tuple(tables)
+
+
+def _binary_key_index(
+    connection: sqlite3.Connection, index: str, column_id: int, column_name: str
+) -> None:
+    keys = [
+        entry
+        for entry in connection.execute(f"PRAGMA main.index_xinfo({_quote(index)})")
+        if entry[5] == 1
+    ]
+    if (
+        len(keys) != 1
+        or keys[0][1] != column_id
+        or keys[0][2] != column_name
+        or not isinstance(keys[0][4], str)
+        or keys[0][4].upper() != "BINARY"
+    ):
+        raise DatabaseError("Unsupported schema: TEXT key collation must be BINARY")
+
+
+def _binary_column_collation(
+    connection: sqlite3.Connection, table_name: str, primary_key: str
+) -> None:
+    # A table-level PK can override its column's collation. SQLite FK equality uses the
+    # column default, so a BINARY PK index alone is insufficient. Ask SQLite to derive
+    # that default in an empty, isolated schema probe; never parse CREATE TABLE SQL.
+    declaration = connection.execute(
+        "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?", (table_name,)
+    ).fetchone()
+    if declaration is None or not isinstance(declaration[0], str):
+        raise DatabaseError("Unsupported schema: TEXT primary-key collation metadata")
+    probe_name = "reproseed_column_collation"
+    while _identifier_key(probe_name) == _identifier_key(table_name):
+        probe_name += "_"
+    try:
+        with closing(sqlite3.connect(":memory:")) as probe:
+            probe.execute(declaration[0])
+            probe.execute(
+                f"CREATE INDEX {_quote(probe_name)} ON {_quote(table_name)}({_quote(primary_key)})"
+            )
+            columns = probe.execute(f"PRAGMA table_xinfo({_quote(table_name)})").fetchall()
+            column_id = next(column[0] for column in columns if column[1] == primary_key)
+            _binary_key_index(probe, probe_name, column_id, primary_key)
+    except sqlite3.Error as exc:
+        raise DatabaseError("Unsupported schema: TEXT primary-key collation metadata") from exc
+
+
+def _key_rows(connection: sqlite3.Connection, sql: str) -> list[tuple[object, ...]]:
+    try:
+        return connection.execute(sql).fetchall()
+    except (sqlite3.Error, UnicodeError) as exc:
+        if isinstance(exc, UnicodeError) or "Could not decode" in str(exc):
+            raise DatabaseError("Unsupported schema: malformed TEXT encoding") from exc
+        raise
+
+
+def _validate_key_storage(
+    connection: sqlite3.Connection,
+    table: _Table,
+    column: str,
+    *,
+    primary: bool,
+    family: KeyFamily | None = None,
+) -> None:
+    family = table.key_family if family is None else family
+    identifier = _quote(column)
+    if (
+        primary
+        and family == "TEXT"
+        and connection.execute(
+            f"SELECT 1 FROM {_quote(table.name)} WHERE {identifier} IS NULL LIMIT 1"
+        ).fetchone()
+    ):
+        raise DatabaseError("Unsupported schema: NULL TEXT primary-key value")
+    storage = "text" if family == "TEXT" else "integer"
+    if connection.execute(
+        f"SELECT 1 FROM {_quote(table.name)} "
+        f"WHERE {identifier} IS NOT NULL AND typeof({identifier}) != ? LIMIT 1",
+        (storage,),
+    ).fetchone():
+        role = "primary-key" if primary else "foreign-key"
+        prefix = "Nontext" if family == "TEXT" else "Noninteger"
+        raise DatabaseError(f"{prefix} {role} value in {table.name!r}")
 
 
 def _read_dependencies(
@@ -275,14 +396,22 @@ def _read_dependencies(
                     f"Unsupported schema: foreign key must target {parent.name!r} PK"
                 )
             actual_column = columns.get(_identifier_key(source_column))
-            if actual_column is None or "INT" not in table.column_types[actual_column].upper():
+            if actual_column is None:
+                raise DatabaseError(f"Invalid foreign-key metadata in {table.name!r}")
+            declared_type = table.column_types[actual_column].strip().upper()
+            if parent.key_family == "INTEGER" and "INT" not in declared_type:
                 raise DatabaseError(f"Unsupported schema: noninteger foreign key in {table.name!r}")
+            if parent.key_family == "TEXT" and declared_type != "TEXT":
+                raise DatabaseError(f"Unsupported schema: nontext foreign key in {table.name!r}")
+            _validate_key_storage(
+                connection, table, actual_column, primary=False, family=parent.key_family
+            )
             sql = (
                 f"SELECT {_quote(table.primary_key)}, {_quote(actual_column)} "
                 f"FROM {_quote(table.name)} WHERE {_quote(actual_column)} IS NOT NULL"
             )
-            for child_key, parent_key in connection.execute(sql):
-                if not isinstance(parent_key, int):
-                    raise DatabaseError(f"Noninteger foreign-key value in {table.name!r}")
+            for child_key, parent_key in _key_rows(connection, sql):
+                if not isinstance(child_key, int | str) or not isinstance(parent_key, int | str):
+                    raise DatabaseError("Invalid foreign-key value")
                 edges[(parent.name, parent_key)].add((table.name, child_key))
     return {row: frozenset(children) for row, children in edges.items()}

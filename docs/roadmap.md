@@ -70,15 +70,42 @@ independent semantic oracles, large relational decoy fixtures and relocated-repl
 Add static configuration/schema readiness and optional three-confirmation executable
 diagnosis, with terminal-safe text and separately versioned diagnostic JSON. Preserve the
 adapter subset, ordinary reducer ordering, process protections and bundle/report version 1.
-See [completion evidence](m1b2-completion.md). Hosted M1b.2 validation remains pending Dan's
-review, commit and push. This is the final planned M1b feature milestone before M2.
+See [completion evidence](m1b2-completion.md). M1b.2 was accepted on commit
+`c9cf32ced7f0428385d1daad912d5aa01fec6967` in
+[run 38476866662](https://github.com/chambies2015/ReproSeed/actions/runs/38476866662):
+Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12 all succeeded. The historical
+completion report retains the observations available when it was written. This closes M1b.
+Its accepted application measurements are duplicate export 2,430 -> 5 rows, aggregate
+threshold 11 -> 3, reservations 4,248 -> 9 and approval cycles 1,626 -> 6. These are observed
+results for those fixtures, not reducer rules or claims of global minimality.
 
-## M2 — broader SQLite support
+## M2a — single-column TEXT keys
 
-Extend schema support deliberately, with preserved-value semantics and rejection tests.
-Improve reduction strategies and investigate more precise local minimality evidence.
-Choose supported additions explicitly and extend source/candidate/bundle/replay validation
-together. M1b.2 diagnostics continue to reject unsupported shapes; no M2 support is implemented.
+Add exact declared TEXT PRIMARY KEY to ordinary/STRICT rowid tables using BINARY collation
+established through SQLite index metadata. Require actual non-NULL TEXT PK values and
+matching parent-family FK declaration/storage policy, including mixed INTEGER/TEXT tables,
+nullable references, self-references and cycles. Preserve retained declared values, existing
+integer ordering, reduction/oracle accounting and every version-1 serialized contract.
+Hidden rowids of TEXT-keyed tables may change during compaction; final verification must
+reconfirm the exported fixture. VARCHAR/CHAR, arbitrary collations, composite keys,
+WITHOUT ROWID and other previously unsupported shapes remain outside this milestone.
+
+The string-ID entitlement application exercises a separate tenant-scoping defect and
+multi-level mixed-key dependencies. Extend schema rejection, reduction, diagnostic,
+inspection/replay and installed-wheel coverage together. Preserve historical version-1
+bundles and all four integer application acceptance cases. See [M2a completion evidence](m2a-completion.md)
+for actual local checks and measurements; hosted M2a validation requires Dan's later commit
+and push. M2a is a prototype milestone, not a production-ready or alpha release.
+
+## M2b — proposed composite-key support
+
+Investigate single-family or mixed-family composite primary keys with explicitly matching
+composite foreign keys, retaining the INTEGER/TEXT and BINARY restrictions where applicable.
+This is a proposal, not implemented support. Establish metadata-driven tuple identities,
+per-column storage/NULL/collation rules, parent affinity semantics and deterministic ordering
+before selecting a bounded addition. Add a separate realistic fixture and rejection tests,
+then extend shared diagnosis/candidate/bundle/replay checks together. Defer arbitrary collations
+and WITHOUT ROWID until their preservation and comparison contracts can be justified.
 
 ## M3 — PostgreSQL
 

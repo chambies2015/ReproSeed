@@ -8,7 +8,9 @@ import pytest
 from milestone_smoke import exercise_example
 
 
-@pytest.mark.parametrize("example", ["reservation_overbook", "approval_cycle"])
+@pytest.mark.parametrize(
+    "example", ["reservation_overbook", "approval_cycle", "text_key_entitlements"]
+)
 def test_realistic_complete_relocated_acceptance(example: str, tmp_path: Path) -> None:
     measured = exercise_example(example, tmp_path / example)
     assert measured["unresolved_attempts"] == 0

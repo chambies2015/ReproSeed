@@ -294,7 +294,7 @@ def test_deterministic_inconsistent_baseline_preserves_all_observations(tmp_path
 def test_invalid_input_never_launches_and_returns_json(tmp_path: Path, invalid: str) -> None:
     sentinel = tmp_path / "must-not-launch"
     schema = (
-        "CREATE TABLE items(id TEXT PRIMARY KEY);"
+        "CREATE TABLE items(id VARCHAR PRIMARY KEY);"
         if invalid == "schema"
         else "CREATE TABLE items(id INTEGER PRIMARY KEY);"
         "CREATE TABLE children(id INTEGER PRIMARY KEY,parent_id INTEGER REFERENCES items(id));"

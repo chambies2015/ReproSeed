@@ -158,5 +158,14 @@ jobs:
               after = hashlib.sha256((relocated / "fixture.sqlite3").read_bytes()).hexdigest()
               assert after == before
               assert file_hashes(relocated) == original_bundle_hashes
+              # Full pytest already reduces the 970-row TEXT application. Reuse
+              # its complete workflow checks with ten rows for wheel integration.
+              subprocess.run(
+                  [str(python), str(repository / "tests" / "milestone_smoke.py"),
+                   "--directory", str(outside / "text-key-wheel-smoke"),
+                   "--python", str(python), "--cli", str(cli),
+                   "--examples", "text_key_entitlements", "--small-text-fixture"],
+                  cwd=outside, env=environment, check=True, timeout=180,
+              )
           print("Installed wheel CLI diagnosed, reduced, inspected, and replayed outside the checkout.")
           PY

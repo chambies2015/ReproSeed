@@ -9,7 +9,7 @@ from pathlib import Path
 from reproseed.config import Config
 from reproseed.oracle import OracleInterrupted, OracleInvocation, OracleResult, Outcome, run_oracle
 from reproseed.reducer import AbortReduction, BudgetExhausted, Evaluation, reduce_rows
-from reproseed.sqlite_adapter import DatabaseError, DatabaseModel, compact, snapshot
+from reproseed.sqlite_adapter import DatabaseError, DatabaseModel, RowId, compact, snapshot
 
 
 class VerificationError(ValueError):
@@ -111,7 +111,7 @@ def build_verified_fixture(config: Config, destination: Path) -> dict[str, objec
                 "baseline failed three fresh confirmations: " + ", ".join(outcomes)
             )
 
-        def evaluate(retained: frozenset[tuple[str, int]]) -> Evaluation:
+        def evaluate(retained: frozenset[RowId]) -> Evaluation:
             if counter.charged + 2 > config.max_invocations - 3:
                 raise BudgetExhausted
             with tempfile.TemporaryDirectory(prefix="trial-", dir=working) as trial:

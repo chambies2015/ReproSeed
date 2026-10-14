@@ -29,6 +29,7 @@ EXAMPLES = {
     "threshold": (11, 3),
     "reservation_overbook": (3500, 12),
     "approval_cycle": (1500, 10),
+    "text_key_entitlements": (800, 12),
 }
 
 
@@ -76,6 +77,12 @@ def database_state(database: Path) -> DatabaseState:
                         f"PRAGMA foreign_key_list({quote(table)})"
                     ).fetchall(),
                     "indexes": connection.execute(f"PRAGMA index_list({quote(table)})").fetchall(),
+                    "index_columns": {
+                        index[1]: connection.execute(
+                            f"PRAGMA index_xinfo({quote(index[1])})"
+                        ).fetchall()
+                        for index in connection.execute(f"PRAGMA index_list({quote(table)})")
+                    },
                 }
                 for table in tables
             },
@@ -97,7 +104,7 @@ def specific_application_failure(
     example: str, source_root: Path, database: Path, python: Path, directory: Path
 ) -> None:
     """Check actual app decisions and relational causes without trusting its oracle."""
-    if example not in {"reservation_overbook", "approval_cycle"}:
+    if example not in {"reservation_overbook", "approval_cycle", "text_key_entitlements"}:
         return
     decisions = json.loads(
         succeeded(run([str(python), str(source_root / "app.py"), str(database)], directory))
@@ -124,7 +131,7 @@ def specific_application_failure(
                 len(requests) >= 2 and sum(request[2] for request in requests) > requests[0][1]
                 for requests in per_lot.values()
             ), "No individually valid accepted reservations actually overbook stock"
-        else:
+        elif example == "approval_cycle":
             cycles = connection.execute(
                 """
                 SELECT a.id, b.id, a.workflow_id, b.workflow_id
@@ -137,6 +144,33 @@ def specific_application_failure(
             assert len({row[2] for row in cycles}) == 1
             assert all(row[2] == row[3] and decisions[str(row[2])] is True for row in cycles)
             assert connection.execute('SELECT COUNT(*) FROM "approval activity"').fetchone() == (0,)
+        else:
+            grants = connection.execute(
+                """
+                SELECT event_receipts.id, accounts.tenant_id, events.external_reference,
+                       events.account_id, entitlements.account_id
+                FROM event_receipts
+                JOIN events ON events.id = event_receipts.event_id
+                JOIN accounts ON accounts.id = events.account_id
+                JOIN entitlements ON entitlements.id = events.entitlement_id
+                WHERE event_receipts.status = 'pending' AND events.operation = 'grant'
+                      AND entitlements.enabled = 1
+                ORDER BY event_receipts.id
+                """
+            ).fetchall()
+            scoped_seen: set[tuple[int, str]] = set()
+            accepted_tenants: dict[str, set[int]] = {}
+            suppressed = False
+            for receipt, tenant, reference, account, owner in grants:
+                assert account == owner
+                actual = decisions[str(receipt)]
+                if (tenant, reference) not in scoped_seen and actual is False:
+                    assert accepted_tenants.get(reference, set()) - {tenant}
+                    suppressed = True
+                if actual is True:
+                    accepted_tenants.setdefault(reference, set()).add(tenant)
+                scoped_seen.add((tenant, reference))
+            assert suppressed, "No valid grant was suppressed by another tenant's event reference"
 
 
 def run(arguments: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -207,6 +241,7 @@ def exercise_example(
     *,
     python: Path = Path(sys.executable),
     cli: list[str] | None = None,
+    small_text_fixture: bool = False,
 ) -> dict[str, Any]:
     """Run one complete real workflow; raise on any contract or row-target failure."""
     directory.mkdir(parents=True, exist_ok=False)
@@ -219,17 +254,32 @@ def exercise_example(
             shutil.copy2(asset, source_root / asset.name)
     source = source_root / "fixture.sqlite3"
     config = source_root / "reproseed.toml"
-    succeeded(run([str(python), str(source_root / "generate.py"), str(source)], directory))
+    generator_flags = (
+        ["--small"] if small_text_fixture and example == "text_key_entitlements" else []
+    )
+    succeeded(
+        run(
+            [str(python), str(source_root / "generate.py"), str(source), *generator_flags],
+            directory,
+        )
+    )
     original = database_state(source)
     original_rows = sum(original.counts.values())
     minimum_rows, maximum_rows = EXAMPLES[example]
+    if generator_flags:
+        minimum_rows = maximum_rows = 10
     assert original_rows >= minimum_rows
     if example in {"duplicate_export", "threshold"}:
         assert original_rows == minimum_rows
     if example == "duplicate_export":
         assert original.counts == {"entries": 2400, "owners": 6, "projects": 24}
     deterministic = directory / "deterministic.sqlite3"
-    succeeded(run([str(python), str(source_root / "generate.py"), str(deterministic)], directory))
+    succeeded(
+        run(
+            [str(python), str(source_root / "generate.py"), str(deterministic), *generator_flags],
+            directory,
+        )
+    )
     assert deterministic.read_bytes() == source.read_bytes(), "Generator is not deterministic"
     deterministic.unlink()
     source_before = hashes(source_root)
@@ -331,7 +381,7 @@ def exercise_example(
     final_size = (bundle / "fixture.sqlite3").stat().st_size
     unavailable_source = directory / "example-unavailable"
     unavailable_bundle = directory / "bundle-unavailable"
-    with tempfile.TemporaryDirectory(prefix="reproseed-m1b2-relocated-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="reproseed-milestone-relocated-") as temporary:
         outside = Path(temporary).resolve()
         assert not outside.is_relative_to(REPOSITORY.resolve())
         relocated = outside / "bundle"
@@ -402,6 +452,11 @@ def main() -> None:
         "--cli", type=Path, help="Installed console script; uses --python's runtime"
     )
     parser.add_argument("--examples", nargs="+", choices=tuple(EXAMPLES), default=list(EXAMPLES))
+    parser.add_argument(
+        "--small-text-fixture",
+        action="store_true",
+        help="Use ten TEXT rows for installed-wheel smoke; full acceptance uses 970 rows.",
+    )
     arguments = parser.parse_args()
     directory = arguments.directory.resolve()
     directory.mkdir(parents=True, exist_ok=False)
@@ -419,7 +474,13 @@ def main() -> None:
         assert not Path(runtime["reproseed_module"]).resolve().is_relative_to(REPOSITORY.resolve())
     succeeded(run([*cli, "--help"], directory))
     measurements = [
-        exercise_example(example, directory / example, python=python, cli=cli)
+        exercise_example(
+            example,
+            directory / example,
+            python=python,
+            cli=cli,
+            small_text_fixture=arguments.small_text_fixture,
+        )
         for example in arguments.examples
     ]
     result = {"runtime": runtime, "examples": measurements}

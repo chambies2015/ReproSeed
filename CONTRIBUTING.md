@@ -11,8 +11,8 @@ uv run mypy
 uv run mypy --platform linux
 uv run --locked python -c "from pathlib import Path; Path('.validation').mkdir(exist_ok=True)"
 uv run pytest --basetemp=.validation/pytest
-uv run pytest tests/test_diagnose_cli.py tests/test_diagnostics.py tests/test_realistic_acceptance.py --basetemp=.validation/pytest-focused
-uv run --locked python tests/milestone_smoke.py --directory .validation/m1b2-measurements-fresh
+uv run pytest tests/test_text_keys.py tests/test_diagnose_cli.py tests/test_diagnostics.py tests/test_realistic_acceptance.py --basetemp=.validation/pytest-focused
+uv run --locked python tests/milestone_smoke.py --directory .validation/m2a-measurements-fresh
 uv run --locked python tests/compatibility_smoke.py --directory .validation/pre-m1b-v1-fresh
 uv build --no-sources
 ```
@@ -38,12 +38,33 @@ reviewed pre-M1b source before checking the current reader and replay.
 
 The installed-wheel threshold smoke also exercises default-text static diagnosis and
 JSON static/executable diagnosis. Use `tests/milestone_smoke.py --directory <new-directory>
---python <installed-interpreter> --cli <installed-console>` for all four measured examples.
+--python <installed-interpreter> --cli <installed-console>` for all five measured examples.
 Run it outside the checkout with an isolated wheel installation. It records counts, actual
 invocations, budget, cache/acceptance summaries, elapsed reduction time, file sizes and
 source/bundle hash equality. It checks retained values/schema/metadata and replays relocated
 bundles after original example paths are made unavailable. Large reductions belong in the
 acceptance suite and explicit measurement recipe, not repeated in small formatting tests.
+
+M2a validation also requires `tests/test_text_keys.py` and the
+`examples/text_key_entitlements/` acceptance application. Exercise static and executable
+diagnosis, reduction, default/explicit JSON and text inspection, and three-confirmation
+relocated replay with the installed wheel outside the checkout. Retain source/assets/bundle
+hash equality and declared-value/schema checks; do not assert hidden-rowid equality after
+TEXT-key compaction. Record text/integer example counts, per-table counts, actual invocations
+and finite budget, cache hits, acceptances, invalid/unresolved trials, runtime and fixture sizes.
+Keep large measurement runs explicit rather than multiplying them across small smoke tests.
+
+For rejection fixtures, prove diagnosis and reduction never launch the oracle, publish no
+verified bundle and preserve source hashes. Cover exact TEXT/BINARY keys, nullable-schema
+non-NULL snapshots, wrong storage, malformed text, unsupported collations/FK declarations,
+mixed-family dependencies, empty/Unicode/quoted/NUL keys and cycles using real SQLite files.
+Ordinary integer ordering and cancellation/accounting regressions must continue to pass.
+
+Use a clean copy prepared with CI's explicit `.validation` parent; run full tests, builds
+and the installed-wheel workflow without editable imports. Inspect wheel/sdist contents
+for generated databases, bundles, caches and retained evidence. Record actual Python/SQLite
+versions and actual Windows/Linux runs; mypy's Linux target alone is not Linux execution.
+Preserve the read-only hosted matrix, pinned actions and all three existing platform jobs.
 
 Diagnostic regressions use real subprocesses for outcome/limit/mutation contracts, focused
 interruption injection for launch-accounting boundaries, and a separate POSIX SIGINT test.
@@ -77,4 +98,7 @@ Keep source acquisition, candidate state and oracle state separate. Preserve val
 schema. Add meaningful regression cases for contracts changed by a patch. Do not weaken
 acceptance assertions or silently skip failures. Read AGENTS.md before implementation and
 SECURITY.md before executing external oracle code. Publishing and later roadmap milestones
-are outside M1b.2.
+are outside M2a. Leave milestone work unstaged and uncommitted for Dan's review; do not
+push, open a PR, tag, release or publish packages. M1b.2's accepted hosted evidence is
+commit `c9cf32ced7f0428385d1daad912d5aa01fec6967`, run `38476866662`, all three jobs
+successful. Historical completion reports stay unchanged; M2a hosted evidence remains pending.
