@@ -94,8 +94,24 @@ The string-ID entitlement application exercises a separate tenant-scoping defect
 multi-level mixed-key dependencies. Extend schema rejection, reduction, diagnostic,
 inspection/replay and installed-wheel coverage together. Preserve historical version-1
 bundles and all four integer application acceptance cases. See [M2a completion evidence](m2a-completion.md)
-for actual local checks and measurements; hosted M2a validation requires Dan's later commit
-and push. M2a is a prototype milestone, not a production-ready or alpha release.
+for actual local checks and measurements. The implementation was completed locally and
+pushed as `eb8108dece9055dc9180826f42de03363cb64cbe`. Hosted
+[run 38564568013](https://github.com/chambies2015/ReproSeed/actions/runs/38564568013)
+passed both Ubuntu jobs (Python 3.12/3.14), but Windows/Python 3.12 failed two bundle
+path-security fixture setups in job `115853833714`; build and installed-wheel steps
+were skipped. M2a's hosted gate is therefore incomplete. Historical completion reports
+retain their original local observations. M2a is a prototype milestone, not a
+production-ready or alpha release.
+
+## M2a.1 — Windows bundle-fixture reliability repair
+
+Investigate the shared one-second fixture deadline, retain real mutating subprocesses
+and six strict baseline/final confirmations, and strengthen synthetic setup diagnostics
+and separate deadline regressions. See [M2a.1 completion evidence](m2a1-completion.md)
+for actual timing probes, finite Windows stability results and platform validation.
+This follow-up repair remains unstaged and uncommitted for Dan; hosted acceptance
+requires the new commit's GitHub CI run. M2b remains planned and is not implemented
+in this patch.
 
 ## M2b — proposed composite-key support
 
