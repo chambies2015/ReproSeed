@@ -162,11 +162,16 @@ class Diagnosis:
         }
 
 
-def _input_error(error: Exception, stage: str) -> DiagnosticError:
+def describe_input_error(error: Exception, stage: str) -> DiagnosticError:
     """Curate causes from existing validators without publishing their file paths/values."""
     message = str(error)
     if isinstance(error, ConfigError):
-        if message.startswith("source database is not a regular file"):
+        if message.startswith("configuration file"):
+            reason, detail = (
+                "configuration_unavailable",
+                "The configuration file is missing or unreadable; check the path and permissions.",
+            )
+        elif message.startswith("source database is not a regular file"):
             reason, detail = "source_unavailable", "The source database is not a regular file."
         elif message.startswith("expected a regular file inside configuration root"):
             reason, detail = "asset_unavailable", "An explicitly included asset is unavailable."
@@ -479,7 +484,7 @@ def diagnose(config_path: Path, *, allow_exec: bool = False) -> Diagnosis:
                 isinstance(exc.__cause__, OracleInterrupted) and exc.__cause__.abort
             )
     except (ConfigError, DatabaseError, OSError, sqlite3.Error) as exc:
-        error = _input_error(exc, stage)
+        error = describe_input_error(exc, stage)
         if (
             error.reason.startswith("unsupported_")
             and error.reason != "unsupported_sqlite_version"
@@ -609,6 +614,19 @@ def format_diagnosis(diagnosis: Diagnosis) -> str:
             f"Input error ({escape_terminal(diagnosis.error.stage)}/"
             f"{escape_terminal(diagnosis.error.reason)}): "
             f"{escape_terminal(diagnosis.error.message)}"
+        )
+        lines.append(
+            "Recovery: check the configuration and input files, then rerun static diagnosis; "
+            "see docs/getting-started.md for the supported schema and common errors."
+        )
+    elif (
+        diagnosis.mode == "baseline"
+        and not diagnosis.baseline_confirmed
+        and not diagnosis.interrupted
+    ):
+        lines.append(
+            "Recovery: run the configured application on a disposable copy, check its exit "
+            "and exact marker stream, and review dependencies and execution limits."
         )
     elif diagnosis.mode == "static" and not diagnosis.interrupted:
         lines.append("Next step: use --allow-exec to verify the configured failure.")

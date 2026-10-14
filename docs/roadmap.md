@@ -166,7 +166,11 @@ Generate genuine prior M2b composite evidence from its archived accepted source 
 the existing INTEGER/TEXT compatibility checks. Record actual counts, execution/budget/cache
 summaries, hashes, preserved values/schema/FKs, timing and file sizes. Preserve the hosted
 matrix and standard-library runtime. See [M2c completion evidence](m2c-completion.md) for
-actual validation and limits; hosted M2c acceptance requires Dan's subsequent commit/push.
+actual validation and limits. M2c was accepted at commit
+`dd3db90eee65ed10e158cdcc9ef16b8a677e9852` in
+[hosted run 38599450878](https://github.com/chambies2015/ReproSeed/actions/runs/38599450878):
+Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12 passed.
+The historical completion report retains the evidence available when written.
 
 Three-or-more-component keys, descending WITHOUT ROWID/composite keys, arbitrary collations,
 coercive affinity matching, non-PK UNIQUE/reordered FK targets, generated/hidden columns,
@@ -175,18 +179,31 @@ without a PK, AUTOINCREMENT and NULL PK inserts; these are separate from adapter
 PostgreSQL, LLM integration, web UI and package publication are outside M2c. Milestone work
 stays unstaged and uncommitted for Dan.
 
-## Proposed public-alpha readiness and usability review
+## M2d — public-alpha readiness and first-user onboarding
 
-After M2c's hosted gate, separately review installation from the built package, first-use
-configuration/oracle guidance, diagnosis clarity, limits and failure messages, bundle sharing
-and relocated replay from a fresh environment. Use synthetic user journeys and document
-friction, platform gaps, execution trust boundaries and release criteria before deciding
-whether a public alpha is ready. This review is proposed follow-up work; M2c does not publish
-packages or declare the prototype production-ready.
+Freeze the accepted SQLite and version-1 correctness contracts. Verify installation from
+a locally built wheel with standard venv/pip outside the checkout and no consumer network
+or uv requirement. Keep complete [getting-started examples](getting-started.md) synchronized
+with executable tutorial assets; audit realistic mistakes, recovery, safe diagnostics,
+package contents and bundle sharing. Preserve the six applications and alternate billing
+layout, historical INTEGER/TEXT/composite bundles and the existing hosted matrix.
+See [readiness gates](alpha-readiness.md) and [M2d completion evidence](m2d-completion.md).
+Hosted M2d validation requires Dan's subsequent review, commit and push. This milestone
+changes no version and publishes no package, release or tag.
+
+## Next — limited-alpha decision and outside-user feedback
+
+Resolve the readiness conditions, then Dan decides the supported alpha scope and a
+distribution channel. Invite independent developers to attempt the documented workflow
+and record task completion, confusion, dependency gaps and useful reproducer sharing.
+The internal first-user simulation is not that study. Prioritize observed correctness
+or onboarding blockers before speculative SQLite expansion or a broader adapter.
+Any future alpha release identifier and publication need a separate explicit decision.
 
 ## M3 — PostgreSQL
 
-Add an adapter only after SQLite contracts and replay evidence are stable. Revisit snapshot,
+Consider an adapter only after the limited-alpha decision and outside-user feedback,
+with SQLite contracts and replay evidence stable. Revisit snapshot,
 dependency, server permissions and reproducibility semantics for PostgreSQL.
 
 ## Later

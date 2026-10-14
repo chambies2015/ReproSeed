@@ -1,55 +1,67 @@
 # ReproSeed
 
-Smaller fixture. Same specified failure. Independently replayable evidence.
+ReproSeed turns a large data-dependent SQLite failure into a small fixture that another
+developer can replay. You supply a command that detects one specific failure. The local
+Python CLI removes rows, preserves relational validity, and reconfirms that exact failure
+before writing a bundle with the database, explicitly included code and verification evidence.
 
-ReproSeed is an M2c prototype of a local Python CLI. It reduces a disposable SQLite
-fixture to a relationally valid row subset while reconfirming the explicit exit/marker
-contract supplied by the user. It exports a compact fixture, replay assets and evidence.
-It does not infer semantic crash equivalence. Reduction is not anonymization, and the
-result is not proven globally minimal.
+For example, the synthetic [aggregate threshold application](examples/threshold/README.md)
+shrinks from **11 rows to 3**: one crate and the two parcels whose combined mass exceeds
+100. The oracle still detects that condition in three fresh final confirmations. The
+bundle can be moved elsewhere and replayed without the original database or project paths.
+This is a measured example, not a promised reduction ratio for other applications.
 
-## Quickstart
+## Try it locally
 
-With [uv](https://docs.astral.sh/uv/) installed, run from this checkout:
+Start with [Getting started](docs/getting-started.md): install a locally built wheel in a
+fresh Python virtual environment using `venv` and `pip`, create the complete synthetic
+example, diagnose, reduce, inspect and relocate/replay it. The guide has Windows PowerShell
+and Linux shell commands; its consumer workflow needs no uv, editable install or network
+after obtaining the wheel. No public package-index installation is claimed.
 
+ReproSeed remains a prototype. The [limited-alpha readiness review](docs/alpha-readiness.md)
+records a conditional go, pending hosted validation, outside-user feedback and a distribution decision.
+It requires Python 3.12+ and SQLite 3.37+, supports a
+[bounded SQLite schema subset](docs/architecture.md#supported-schema), and runs configured
+code with your OS permissions when you supply `--allow-exec`. Reduction is not
+anonymization, global minimality or proof that all crashes are equivalent. External application
+dependencies remain your responsibility. Read [the trust boundaries](SECURITY.md) before
+executing or sharing a bundle.
+
+The first-use sequence with the installed CLI is:
+
+```console
+reproseed diagnose --config reproseed.toml
+reproseed diagnose --config reproseed.toml --allow-exec
+reproseed reduce --config reproseed.toml --out bundle --allow-exec
+reproseed inspect bundle --format text
+reproseed replay bundle --allow-exec
 ```
-uv sync --locked --python 3.12
-uv run python examples/duplicate_export/generate.py
-uv run reproseed diagnose --config examples/duplicate_export/reproseed.toml
-uv run reproseed diagnose --config examples/duplicate_export/reproseed.toml --allow-exec
-uv run reproseed reduce --config examples/duplicate_export/reproseed.toml --out ./repro-bundle --allow-exec
-uv run reproseed inspect ./repro-bundle
-uv run reproseed inspect ./repro-bundle --format text
-uv run reproseed replay ./repro-bundle --allow-exec
-```
 
-The deterministic example has 2,430 user rows. A deliberately buggy exporter keys entries
-by name globally, losing one of two same-name entries in different projects. The separate
-oracle exercises the exporter and verifies that particular omission before emitting its
-marker. The intended essential case has one owner, two projects and two entries. An
-independent numeric-threshold example lives in examples/threshold/. More demanding examples
-exercise [inventory reservations](examples/reservation_overbook/README.md) and
-[cyclic approvals](examples/approval_cycle/README.md).
-The [text-key entitlement example](examples/text_key_entitlements/README.md) exercises
-a separate tenant-scoping defect with mixed INTEGER/TEXT keys and several FK levels.
-The [composite billing example](examples/composite_billing/README.md) uses two-column
-invoice/account keys and detects an invoice falsely marked paid when refunds are added
-to settled payments. Its full fixture has 1,308 rows; `generate.py --small` retains the
-same application defect in eight rows for installed-wheel validation.
-Its explicit `--without-rowid` generator mode uses the same data and oracle with five
-WITHOUT ROWID tables and an ordinary INTEGER-keyed payments table.
+Choose a new output directory for each reduction. Static diagnosis and inspection execute
+no oracle code; executable diagnosis confirms three fresh baseline attempts. Inspection
+checks hashes, fixture validity and recorded evidence; a new replay establishes new outcomes.
+See [diagnostic output](docs/diagnostics.md), [contributing and validation](CONTRIBUTING.md)
+and [the roadmap](docs/roadmap.md).
 
-Choose a new output directory for every reduction. Copy/move the completed bundle elsewhere
-and replay using the installed CLI; original fixture and example files are unnecessary.
-Only Python and ReproSeed are needed for these demos. Arbitrary applications may require
-external executables/dependencies, which ReproSeed does not package automatically.
+## Example applications
 
-For your own application, prepare a disposable SQLite fixture and write an oracle that
-exercises the actual defect, emitting one exact marker and the configured exit only for
-that specific failure. List its supporting files explicitly in version-1 configuration.
-Run static diagnosis, then acknowledge execution to confirm the baseline. Reduce into a
-new directory and inspect the result. Review retained data and included code before sharing
-the bundle; the recipient reconfirms with `replay --allow-exec` using the installed CLI.
+Six independent synthetic applications exercise actual data-dependent behavior:
+
+| Application | Previously measured rows, original → retained | Failure checked |
+| --- | --- | --- |
+| [Duplicate export](examples/duplicate_export/README.md) | 2,430 → 5 | An exporter loses a same-name entry from a different project |
+| [Aggregate threshold](examples/threshold/README.md) | 11 → 3 | A crate's combined parcel mass exceeds 100 |
+| [Reservation overbooking](examples/reservation_overbook/README.md) | 4,248 → 9 | Reservations exceed available inventory |
+| [Cyclic approvals](examples/approval_cycle/README.md) | 1,626 → 6 | An approval application mishandles a cycle |
+| [TEXT entitlements](examples/text_key_entitlements/README.md) | 970 → 10 | Entitlements cross a tenant boundary |
+| [Composite billing](examples/composite_billing/README.md) | 1,308 → 8 | Refunds are incorrectly added to settled payments |
+
+The same billing application has a seventh execution scenario with five WITHOUT ROWID
+tables and one ordinary INTEGER-keyed payments table; its previous measurement is also
+1,308 → 8. These are measurements of deterministic fixtures, not hardcoded reducer targets.
+The small TEXT and billing generators retain the real decisions for fast installed-wheel
+checks. The demos need only Python and installed ReproSeed.
 
 ## Diagnosing a fixture
 
@@ -264,7 +276,12 @@ Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12 all passed.
 M2b was accepted at commit `d70edac43c22efe3df643b821af1c51ec756a945` in
 [hosted run 38592071692](https://github.com/chambies2015/ReproSeed/actions/runs/38592071692):
 Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12 all passed.
-[M2c completion evidence](docs/m2c-completion.md) records actual local validation and its
-limits; hosted M2c acceptance requires Dan's subsequent review, commit and push.
-Historical reports remain unchanged. A separate public-alpha readiness and usability review
-is proposed after M2c. PostgreSQL and package publication are outside this milestone.
+[M2c completion evidence](docs/m2c-completion.md) records historical local validation and its
+limits. M2c was accepted at commit `dd3db90eee65ed10e158cdcc9ef16b8a677e9852` in
+[hosted run 38599450878](https://github.com/chambies2015/ReproSeed/actions/runs/38599450878):
+Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12 all passed.
+[M2d completion evidence](docs/m2d-completion.md) records the simulated consumer journey and
+[limited-alpha readiness decision](docs/alpha-readiness.md). Hosted validation of M2d remains
+pending Dan's review, commit and push. Historical completion reports remain unchanged.
+Independent outside-user feedback precedes further speculative schema expansion;
+PostgreSQL and publication remain separate future work.

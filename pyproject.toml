@@ -9,8 +9,15 @@ description = "Reduce SQLite fixtures while preserving an explicitly specified f
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
+license-files = ["LICENSE"]
 authors = [{name = "ReproSeed contributors"}]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/chambies2015/ReproSeed"
+Repository = "https://github.com/chambies2015/ReproSeed"
+Issues = "https://github.com/chambies2015/ReproSeed/issues"
+Documentation = "https://github.com/chambies2015/ReproSeed/blob/main/docs/getting-started.md"
 
 [project.scripts]
 reproseed = "reproseed.cli:main"

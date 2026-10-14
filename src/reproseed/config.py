@@ -111,7 +111,15 @@ def load_config(path: Path) -> Config:
         raw = tomllib.loads(data.decode("utf-8"))
     except ConfigError:
         raise
-    except (OSError, ValueError, RecursionError) as exc:
+    except FileNotFoundError as exc:
+        raise ConfigError("configuration file is missing") from exc
+    except PermissionError as exc:
+        raise ConfigError("configuration file is not readable; check permissions") from exc
+    except OSError as exc:
+        raise ConfigError(
+            "configuration file cannot be read; check the file and permissions"
+        ) from exc
+    except (ValueError, RecursionError) as exc:
         raise ConfigError(
             "cannot read TOML configuration: malformed UTF-8/TOML or excessive nesting"
         ) from exc

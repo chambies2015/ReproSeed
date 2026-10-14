@@ -272,6 +272,15 @@ README.md and manifest.json. Manifest SHA256 hashes cover all required artifacts
 the manifest itself. Runtime/tool versions are recorded. The writer retains this version-1
 format; display-only row totals and percentages are derived during text inspection.
 
+Bundle construction first creates one exclusive private staging parent beside the intended
+output. A denied mkdir propagates before snapshotting or oracle execution. This avoids
+Windows tempfile retrying ACL-denied mkdirs when its os.access check claims the parent is
+writable. Existing portable temporary-directory cleanup runs inside that owned parent;
+cleanup must preserve an active interruption/error rather than replace it with a directory
+removal error. Publication still uses exclusive output creation and never owns a preexisting
+output or staging-name collision. Interrupted cleanup can leave private temporary data;
+temporary state is not securely erased.
+
 Inspection and replay share a private acquisition lifecycle:
 
 1. Read bounded manifest metadata, validate its version/shape and declared portable artifact
@@ -319,6 +328,12 @@ successful inspection or TARGET_FAILURE replay; 1 means baseline/final verificat
 or replay was PASS/UNRESOLVED; 2 means usage/configuration/schema/filesystem/bundle error;
 130 means interrupted before completing verification. An interrupted search can still
 return 0 if its preserved fixture passes final verification; report.json records interruption.
+
+M2d curates input/configuration/schema/filesystem stderr through the diagnostic cause
+mapper and adds human recovery guidance. Missing/unreadable configuration is distinguished
+from malformed TOML, and snapshot timeouts retain their specific cause. Residual bundle and
+verification text escapes terminal controls. Successful command JSON, report/replay version
+1 and diagnostic JSON version 1 retain their existing shapes and exit meanings.
 
 ## Cancellation boundaries
 

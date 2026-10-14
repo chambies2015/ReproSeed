@@ -11,8 +11,13 @@ from pathlib import Path
 from reproseed import __version__
 from reproseed.artifacts import BundleError, acquire_bundle, create_bundle, replay_bundle
 from reproseed.config import ConfigError, load_config
-from reproseed.diagnostics import diagnose, format_diagnosis, serialize_diagnosis
-from reproseed.inspection import format_inspection
+from reproseed.diagnostics import (
+    describe_input_error,
+    diagnose,
+    format_diagnosis,
+    serialize_diagnosis,
+)
+from reproseed.inspection import escape_terminal, format_inspection
 from reproseed.sqlite_adapter import DatabaseError
 from reproseed.workflow import VerificationError
 
@@ -107,10 +112,36 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result["outcome"] == "TARGET_FAILURE" else 1
         return 0
     except VerificationError as exc:
-        print(f"reproseed: {exc}", file=sys.stderr)
+        print(f"reproseed: {escape_terminal(str(exc))}", file=sys.stderr)
+        print(
+            "Recovery: use diagnose --allow-exec to review fresh baseline outcomes, "
+            "the exact exit/marker contract, dependencies and execution limits.",
+            file=sys.stderr,
+        )
         return 1
-    except (ConfigError, BundleError, DatabaseError, OSError, sqlite3.Error) as exc:
-        print(f"reproseed: {exc}", file=sys.stderr)
+    except BundleError as exc:
+        print(f"reproseed: {escape_terminal(str(exc))}", file=sys.stderr)
+        print(
+            "Recovery: check the bundle files and permissions; use a fresh output directory "
+            "for reduction. Obtain an intact trusted copy if integrity validation failed.",
+            file=sys.stderr,
+        )
+        return 2
+    except (ConfigError, DatabaseError, OSError, sqlite3.Error) as exc:
+        stage = "configuration"
+        if isinstance(exc, DatabaseError):
+            stage = (
+                "snapshot"
+                if str(exc) == "Snapshot acquisition timed out"
+                else "database_validation"
+            )
+        detail = describe_input_error(exc, stage)
+        print(f"reproseed: {detail.reason}: {detail.message}", file=sys.stderr)
+        print(
+            "Recovery: check input/output paths and permissions, and run diagnose "
+            "without --allow-exec to review configuration and supported schema.",
+            file=sys.stderr,
+        )
         return 2
     except KeyboardInterrupt:
         print("reproseed: interrupted before a verified bundle could be completed", file=sys.stderr)

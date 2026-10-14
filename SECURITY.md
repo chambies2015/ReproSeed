@@ -51,8 +51,9 @@ contents; immutable mode is deliberately not used.
 
 The per-invocation deadline includes process runtime and pipe EOF. Combined stdout/stderr
 capture has a byte limit; no arbitrary output is retained or serialized. Diagnostics contain
-classification, reason, exit code, byte count and duration. Environment variables and
-credentials are never serialized by ReproSeed.
+classification, reason, exit code, byte count and duration. Inherited environment
+values are not automatically serialized. Explicitly selected
+assets and argv literals may contain credentials and must be reviewed before sharing.
 
 On POSIX, processes start in a fresh session; cleanup kills their process group. A process
 that deliberately detaches can escape this group. On Windows, the runner attempts assignment
@@ -145,6 +146,42 @@ protection against someone with arbitrary access to the user's process or privat
 directories. External executables and dependencies are not included automatically. Supplied
 source and bundle files remain unchanged by tool operations; arbitrary oracle code remains
 subject to the execution trust boundary above.
+
+## Before sharing a bundle
+
+A finalized bundle contains `fixture.sqlite3`, the explicitly included application/oracle
+files, `replay.toml`, `report.json`, `manifest.json` and a generated `README.md`. The replay
+configuration retains the selected argv, exact marker and included filenames. Reports retain
+table names, counts and bounded execution evidence; the database retains selected values and
+schema. Relative asset names, source-code literals and external argv paths can disclose
+information even when no row values appear in CLI output. Files outside the explicit include
+list are not recursively collected, and external dependencies are not packaged automatically.
+
+Before distributing this directory:
+
+- Run `reproseed inspect <bundle> --format text` to review current integrity/structure checks
+  and recorded evidence. Inspection does not execute application code or certify safe data.
+- Open the retained SQLite fixture with a trusted read-only viewer and review every retained
+  table, value, schema declaration and name for information that should not be shared.
+- Review all included source/configuration files, exact markers, filenames and argv literals.
+  Confirm that credentials, personal data and private system paths are absent or deliberately
+  approved for sharing. ReproSeed performs no automatic redaction or anonymization.
+- State the required interpreter, external executables/dependencies and any expected local
+  files. Reconfirm a relocated copy using `reproseed replay <bundle> --allow-exec` in an
+  appropriate environment before asking someone else to reproduce it.
+- Treat received bundles as executable code. Review their contents and trust their origin
+  before acknowledging execution; use external OS isolation or a restricted account for
+  untrusted code. Bundled code executes with the launching user's OS permissions.
+
+A valid manifest establishes matching bytes relative to the supplied hashes. Someone who
+changes an asset and its manifest entry can produce a consistent bundle; that does not
+authenticate a publisher or the recorded history. A verified historical bundle may still
+fail a fresh replay when external dependencies or application behavior differ. Source,
+candidate and replay temporary files are not securely erased.
+
+The [M2d readiness assessment](docs/alpha-readiness.md) records the controlled synthetic
+sharing/error audit and its platform limits. It is an internal simulated first-user review,
+not an independent external-user study or a claim of complete security coverage.
 
 For a suspected vulnerability, contact the repository owner privately through an available
 GitHub contact channel before sharing sensitive proof data. Do not include real databases,

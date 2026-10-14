@@ -8,8 +8,10 @@ import math
 import platform
 import shutil
 import sqlite3
+import sys
 import tempfile
 import tomllib
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -87,11 +89,33 @@ def check_output(config: Config, output: Path) -> Path:
     return output
 
 
+@contextmanager
+def _build_directory(parent: Path) -> Iterator[Path]:
+    # tempfile retries Windows PermissionError when os.access claims a directory
+    # is writable; that ACL-blind check can cause a long denied-mkdir loop.
+    # One exclusive mkdir propagates denial immediately and never owns collisions.
+    owned = parent / (".reproseed-build-" + uuid.uuid4().hex)
+    owned.mkdir(mode=0o700)
+    try:
+        # Keep TemporaryDirectory's portable readonly-file cleanup within our
+        # successfully created private parent, rather than the unchecked output parent.
+        with tempfile.TemporaryDirectory(prefix="payload-", dir=owned) as temporary:
+            yield Path(temporary)
+    finally:
+        already_failing = sys.exc_info()[0] is not None
+        try:
+            owned.rmdir()
+        except OSError:
+            # An inner cleanup failure/interruption can leave its child behind.
+            # Preserve that original exception, including CLI interruption semantics.
+            if not already_failing:
+                raise
+
+
 def create_bundle(config: Config, output: Path) -> dict[str, object]:
     output = check_output(config, output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=".reproseed-build-", dir=output.parent) as temporary:
-        staging = Path(temporary)
+    with _build_directory(output.parent) as staging:
         staged_assets: list[Asset] = []
         for asset in config.assets:
             destination = staging / asset.relative

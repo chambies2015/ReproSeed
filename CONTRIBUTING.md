@@ -18,6 +18,8 @@ uv run --locked python tests/compatibility_smoke.py --directory .validation/pre-
 uv run --locked python tests/compatibility_smoke.py --directory .validation/m2a-text-v1-fresh --history m2a-text
 uv run --locked python tests/compatibility_smoke.py --directory .validation/m2b-composite-v1-fresh --history m2b-composite
 uv build --no-sources
+uv run --locked python tests/distribution_smoke.py --wheel dist/reproseed-0.1.0-py3-none-any.whl --sdist dist/reproseed-0.1.0.tar.gz
+uv run --locked python tests/external_consumer_smoke.py --wheel dist/reproseed-0.1.0-py3-none-any.whl --evidence .validation/m2d-consumer-fresh.json
 ```
 
 Create the `.validation` parent explicitly before pytest, including in a fresh checkout.
@@ -30,12 +32,27 @@ Windows Developer Mode or symlink privileges; POSIX signal tests run only on POS
 skips and environment failures honestly. CI covers Linux Python 3.12/3.14 and Windows 3.12;
 configuration alone is not evidence of a successful hosted run.
 
-After building, install dist/reproseed-0.1.0-py3-none-any.whl into a fresh virtual environment
-with `uv pip install --python <fresh-interpreter> --no-deps <wheel-path>`. Change directory
-outside the repository and run that environment's `reproseed --help`. Copy one synthetic
-example into that external working directory, generate its fixture, reduce, inspect with
-default JSON, explicit JSON and text, relocate and replay it. Do not let an editable source
-installation hide a broken wheel. The compatibility recipe requires a new tool-owned
+After building, use the external-consumer smoke above. It accepts one concrete wheel,
+creates a fresh standard-library `venv` outside the checkout, and installs with that
+interpreter's `pip install --no-index --no-deps`. The consumer needs no uv or network.
+It removes Python path/home leakage, proves imports originate in installed site-packages,
+and uses installed console entry points. It checks help/version, the documented threshold
+fixture and oracle, static/executable diagnosis, reduction, default/explicit JSON and text
+inspection, then three fresh replay confirmations from an unrelated working directory
+after original paths are unavailable. Spaces/Unicode paths, complete source/bundle hashes,
+retained values/schema/FKs and finite subprocess deadlines are checked. Its own temporary
+state is cleaned up; optional evidence must be a new file under ignored `.validation`.
+This is a simulated first-user journey, not an external user study. The guide's full
+files are kept equal to retained example assets by `tests/test_getting_started.py`.
+Add `--audit-errors` to exercise the installed negative-path/sharing audit; it records
+commands, exact exits, observed oracle starts, input/bundle byte checks and recovery.
+Windows uses controlled ACL denials and junctions; POSIX permission checks must run as
+an account that cannot bypass mode bits. Record privilege-related skips. Add
+`--existing-applications` for the established small TEXT/composite/WITHOUT ROWID wheel
+lifecycles. CI keeps these small and leaves full seven-scenario measurements explicit.
+`distribution_smoke.py` checks exact wheel runtime files, source byte equality,
+metadata/license/entry point, sdist docs/examples/tests, and generated-file exclusions.
+Do not let an editable source installation hide a broken wheel. The compatibility recipe requires a new tool-owned
 scratch directory under `.validation`; it generates a genuine version-1 bundle from the
 reviewed pre-M1b source before checking the current reader and replay.
 The separate `--history m2a-text` mode archives accepted M2a.1 source at
@@ -145,7 +162,12 @@ also with all three jobs successful. M2b was accepted at commit
 `d70edac43c22efe3df643b821af1c51ec756a945` in
 [hosted run 38592071692](https://github.com/chambies2015/ReproSeed/actions/runs/38592071692),
 with Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12 successful.
-Historical completion reports stay unchanged; hosted M2c acceptance remains pending Dan's
-subsequent commit/push. Propose a separate public-alpha readiness and usability review after
-this milestone. Do not implement PostgreSQL, LLM integration or web UI, publish packages,
+M2c was accepted at commit `dd3db90eee65ed10e158cdcc9ef16b8a677e9852` in
+[hosted run 38599450878](https://github.com/chambies2015/ReproSeed/actions/runs/38599450878),
+with Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12 passed.
+Historical completion reports stay unchanged; hosted M2d acceptance remains pending Dan's
+subsequent commit/push. See [alpha readiness](docs/alpha-readiness.md) and
+[M2d evidence](docs/m2d-completion.md) for the internal simulation and remaining gates.
+An actual limited-alpha decision and independent outside-user feedback precede broader
+schema/adapters. Do not implement PostgreSQL, LLM integration or web UI, publish packages,
 or call the prototype production-ready.

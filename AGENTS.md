@@ -1,6 +1,6 @@
 # Engineering guidance
 
-ReproSeed M2c is a local Python 3.12+ CLI with a standard-library-only runtime.
+ReproSeed M2d is a local Python 3.12+ CLI with a standard-library-only runtime.
 Architecture and scope are described in docs/architecture.md and docs/roadmap.md.
 
 ## Module boundaries
@@ -64,6 +64,9 @@ Use synthetic fixtures and real SQLite/subprocess integration tests. Preserve us
   are never replacement row identities. WITHOUT ROWID tables have no hidden rowid.
   Reconfirm the compact fixture.
 - Bundle assets are explicit regular files, never recursive collection or implicit secrets.
+- Acquire bundle staging with bounded exclusive creation before oracle execution; denied
+  output permissions fail promptly, collisions preserve existing paths, and cleanup errors
+  do not replace an active interruption or failure.
 - Inspect/replay validate copied payload bytes against the captured manifest before execution.
 - Replay sources every fresh invocation from one verified private payload, never originals.
 - Finalized bundle SQLite sidecars are rejected without deletion or incorporation.
@@ -98,6 +101,8 @@ uv run --locked python tests/compatibility_smoke.py --directory .validation/pre-
 uv run --locked python tests/compatibility_smoke.py --directory .validation/m2a-text-v1-fresh --history m2a-text
 uv run --locked python tests/compatibility_smoke.py --directory .validation/m2b-composite-v1-fresh --history m2b-composite
 uv build --no-sources
+uv run --locked python tests/distribution_smoke.py --wheel dist/reproseed-0.1.0-py3-none-any.whl --sdist dist/reproseed-0.1.0.tar.gz
+uv run --locked python tests/external_consumer_smoke.py --wheel dist/reproseed-0.1.0-py3-none-any.whl
 ```
 
 Run acceptance tests and install the wheel outside the source import context when changes
@@ -123,8 +128,12 @@ See CONTRIBUTING.md for the complete validation workflow and platform limits.
 Accepted M1b.2 evidence is commit c9cf32ced7f0428385d1daad912d5aa01fec6967 and hosted
 run 38476866662. Accepted M2a.1 is commit d60c79c07ae12666af9572ced69edc3b9523ce17 and
 hosted run 38572680512. Accepted M2b is commit d70edac43c22efe3df643b821af1c51ec756a945 and hosted
-run 38592071692. All three passed Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python
-3.12. Preserve historical completion reports. M2c changes stay unstaged and uncommitted
-for Dan; hosted validation requires his subsequent commit and push. Propose a separate
-public-alpha readiness/usability review afterward. Do not implement PostgreSQL, LLM
+run 38592071692. Accepted M2c is commit dd3db90eee65ed10e158cdcc9ef16b8a677e9852 and
+hosted run 38599450878. All four passed Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python
+3.12. Preserve historical completion reports. M2d changes stay unstaged and uncommitted
+for Dan; hosted validation requires his subsequent commit and push. External-consumer
+validation uses a fresh standard venv/pip installation outside the checkout, with no network,
+editable imports or PYTHONPATH/PYTHONHOME leakage. Keep tutorial files synchronized with
+docs/getting-started.md. Readiness review does not authorize publication; independent outside-user
+feedback follows the limited-alpha decision. Do not implement PostgreSQL, LLM
 integration or web UI, or publish a release/package, in this milestone.

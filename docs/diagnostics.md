@@ -13,7 +13,7 @@ interruption or a hard nonlaunch blocks completion. Every executed PASS or UNRES
 observation is retained and the remaining confirmations are attempted. All three must
 be TARGET_FAILURE; there is no majority vote.
 
-M2c uses the same `DatabaseModel` for diagnosis, reduction and private bundle validation.
+ReproSeed uses the same `DatabaseModel` for diagnosis, reduction and private bundle validation.
 Exact declared TEXT PRIMARY KEY with a metadata-confirmed BINARY PK index is supported
 alongside the existing INTEGER rowid-alias family, including mixed tables and matching
 parent-family foreign keys. Exactly two ascending PK components of exact INTEGER/TEXT
@@ -105,6 +105,12 @@ stdout/stderr or inherited environment values. Table names are schema metadata. 
 escapes terminal controls, including Unicode direction controls. Runtime durations and
 output-byte counts describe actual observations and may differ between executions.
 Integer and boolean facts, table ordering and static formatting are deterministic.
+
+Missing or unreadable configuration produces `configuration_unavailable`; malformed
+UTF-8/TOML produces `malformed_configuration`. These are input errors (exit 2), with no
+oracle launch. Text includes recovery guidance; diagnostic JSON retains the same version-1
+fields. Reduction also uses curated input causes on stderr, so a missing source or invalid
+field does not echo private paths/values. Bundle/verification text escapes terminal controls.
 
 Diagnosis sources each fresh invocation from one private pristine database and frozen
 explicit assets. The supplied source and assets remain unchanged by tool operations.
