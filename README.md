@@ -20,7 +20,9 @@ and Linux shell commands; its consumer workflow needs no uv, editable install or
 after obtaining the wheel. No public package-index installation is claimed.
 
 ReproSeed remains a prototype. The [limited-alpha readiness review](docs/alpha-readiness.md)
-records a conditional go, pending M2f hosted validation and a separate distribution decision.
+records a conditional go with a separate distribution decision. M2f was accepted
+at `e14eaff` in hosted run `38945054973`. The optional M2g integration has a separate
+[validation record](docs/m2g-completion.md); its hosted acceptance awaits Dan's push.
 Independent human usability remains untested and advisory, not a development gate.
 It requires Python 3.12+ and SQLite 3.37+, supports a
 [bounded SQLite schema subset](docs/architecture.md#supported-schema), and runs configured
@@ -71,6 +73,13 @@ tables and one ordinary INTEGER-keyed payments table; its previous measurement i
 1,308 → 8. These are measurements of deterministic fixtures, not hardcoded reducer targets.
 The small TEXT and billing generators retain the real decisions for fast installed-wheel
 checks. The demos need only Python and installed ReproSeed.
+
+An optional [pytest oracle recipe](docs/pytest-oracles.md) reuses the duplicate-export
+application with one exact test nodeid, exception type and message. The bridge checks
+successful setup/teardown and complete session evidence before emitting the target
+marker. Pytest is separately installed; the normal package stays dependency-free.
+The [prepared case](examples/pytest_duplicate_export/README.md) includes the actual
+export invariant, configuration, relocation workflow and a corrected-exporter counterfactual.
 
 ## Diagnosing a fixture
 

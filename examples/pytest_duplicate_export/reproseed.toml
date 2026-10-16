@@ -1,0 +1,14 @@
+version = 1
+source = "fixture.sqlite3"
+include = ["app.py", "test_export.py", "pytest-target.toml"]
+
+[oracle]
+argv = ["{python}", "-m", "reproseed.pytest_oracle", "--target", "pytest-target.toml", "--db", "{db}", "--allow-exec"]
+expected_exit = 86
+marker = "REPROSEED_PYTEST_TARGET_V1"
+stream = "stdout"
+timeout_seconds = 10.0
+output_limit_bytes = 65536
+
+[reduction]
+max_invocations = 400

@@ -1,5 +1,27 @@
 # Contributing
 
+M2g's optional pytest integration is described in [pytest oracles](docs/pytest-oracles.md)
+and [completion evidence](docs/m2g-completion.md). Accepted M2f commit `e14eaff` passed
+hosted run `38945054973`; those results do not validate M2g. Keep new changes unstaged
+and uncommitted for Dan. In addition to the unchanged gates below, run:
+
+```console
+uv run --locked pytest tests/test_pytest_oracle.py --basetemp=.validation/m2g-bridge-new
+uv run --locked python benchmarks/mutations.py --directory .validation/m2g-mutations-new
+uv run --locked python tests/pytest_wheelhouse.py --directory .validation/m2g-wheels-new
+uv run --locked python tests/pytest_bridge_smoke.py --wheel dist/reproseed-0.1.0-py3-none-any.whl --wheelhouse .validation/m2g-wheels-new --full --evidence .validation/m2g-consumers-new.json
+```
+
+Wheelhouse acquisition is explicit setup with the six exact uv.lock wheel URLs/hashes;
+all consumer installs and lifecycle commands use offline pip, standard fresh venvs
+outside the checkout and verified site-packages imports. The finite mutation recipe
+retains M2f's ten probes and adds three real-session pytest semantic probes; every
+control/mutant, invalid result, survivor and timeout remains in its denominator.
+Test a second supported pytest version when available without changing the lockfile.
+Record unavailable Linux/runtime capabilities honestly. Ordinary CI runs only the
+small bridge wheel workflow, preserving the existing three-platform matrix and pinned
+actions. Large application, generated extended and pytest reductions stay explicit.
+
 M2f's generated correctness, mutation sensitivity and exact-cache changes have bounded
 [performance/differential recipe](benchmarks/README.md). Use fresh output directories,
 verify each worker's imported source provenance, separate timing from tracing, and
@@ -51,7 +73,7 @@ before final validation. The generated campaign retains raw synthetic failures b
 assertions, independently joins complete parent keys in SQLite and compares a separate
 reference traversal. Its exhaustive subset counts, model checks, materializations, in-process
 CLI calls and actual subprocess counts are separate evidence. The extended campaign and
-ten-mutant sensitivity run are explicit local gates; ordinary CI uses the small smoke and
+thirteen-mutant sensitivity run are explicit local gates; ordinary CI uses the small smoke and
 the focused tests. Preserve invalid mutants, survivors and timeouts in reports. Run exact
 saved single-case commands from retained captures, with a new output directory.
 

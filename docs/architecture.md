@@ -1,8 +1,18 @@
-# M2f architecture
+# M2g architecture
 
 The contract is: smaller fixture, same specified failure, independently replayable evidence.
 "Same" is the configured exit/marker contract. ReproSeed does not infer semantic equivalence
 between arbitrary crashes. The runtime uses Python 3.12+ standard-library modules only.
+
+The explicitly invoked `pytest_oracle.py` bridge optionally imports separately installed
+pytest after execution acknowledgement. Its independently versioned bounded target TOML
+selects one exact synchronous test and structured exception/message. It snapshots the
+supplied database again, binds the reserved `reproseed_db` fixture, controls configuration
+and plugin discovery, and checks collection, each phase and final session consistency.
+Only a completed matching call with successful setup/teardown emits exit 86 plus the
+fixed stdout marker. PASS requires all three phases. This adapter uses the existing
+version-1 argv/exit/marker runner; reducer/cache/search/budget/report formats are unchanged.
+See [pytest oracle contract](pytest-oracles.md). No automatic pytest plugin is registered.
 
 Opt-in observation uses a small typed callback with a no-op default. CLI-owned sinks
 write aggregate stderr lines and bounded exclusive JSONL outside bundles. Workflow

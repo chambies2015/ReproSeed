@@ -2,7 +2,7 @@
 
 Run with development dependencies installed:
 python benchmarks/mutations.py --directory .validation/mutations-fresh
-No working runtime is patched. Ten explicit mutations and their clean controls
+No working runtime is patched. Thirteen explicit mutations and their clean controls
 run in isolated interpreters, each with a deadline and bounded retained output.
 """
 
@@ -25,6 +25,7 @@ from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 PROBE_PATH = Path("tests/test_m2f_faults.py")
+BRIDGE_PROBE_PATH = Path("tests/test_m2g_faults.py")
 VERSION = 1
 OUTPUT_LIMIT = 16_384
 
@@ -38,6 +39,7 @@ class Mutation:
     test: str
     boundary: str
     invariant: str
+    probe: str = PROBE_PATH.as_posix()
 
 
 MUTATIONS = (
@@ -131,11 +133,47 @@ MUTATIONS = (
         "reader accepted-count chain consistency",
         "each attempt's removed plus retained count equals the committed prior selection",
     ),
+    Mutation(
+        "pytest_message_ignored",
+        "pytest_oracle.py",
+        'and self.calls["call"][1:] == (self.target.exception, self.target.message)',
+        'and self.calls["call"][1] == self.target.exception',
+        "probe_pytest_message",
+        "structured call exception message equality",
+        "a different message is not the specified target",
+        BRIDGE_PROBE_PATH.as_posix(),
+    ),
+    Mutation(
+        "pytest_teardown_ignored",
+        "pytest_oracle.py",
+        'return 2, "setup-or-teardown-failed"',
+        'return TARGET_EXIT, "target"',
+        "probe_pytest_teardown",
+        "required-phase failure must reject before target classification",
+        "a failing finalizer prevents target acceptance",
+        BRIDGE_PROBE_PATH.as_posix(),
+    ),
+    Mutation(
+        "pytest_skip_passed",
+        "pytest_oracle.py",
+        "if self.problem is not None:\n            return 2, self.problem",
+        'if self.problem == "skip-or-xfail-unsupported":\n'
+        '            return 0, "passed"\n'
+        "        if self.problem is not None:\n            return 2, self.problem",
+        "probe_pytest_skip",
+        "skip/incomplete execution rejection",
+        "a skipped call is not a genuine pass",
+        BRIDGE_PROBE_PATH.as_posix(),
+    ),
 )
 
 
 def hashes(source: Path) -> dict[str, str]:
-    paths = [*sorted((source / "src/reproseed").glob("*.py")), source / PROBE_PATH]
+    paths = [
+        *sorted((source / "src/reproseed").glob("*.py")),
+        source / PROBE_PATH,
+        source / BRIDGE_PROBE_PATH,
+    ]
     return {path.relative_to(source).as_posix(): digest(path) for path in paths}
 
 
@@ -145,7 +183,11 @@ def digest(path: Path) -> str:
 
 def snapshot(source: Path, destination: Path) -> None:
     """Copy only explicit regular runtime Python sources and the selected probes."""
-    paths = [*sorted((source / "src/reproseed").glob("*.py")), source / PROBE_PATH]
+    paths = [
+        *sorted((source / "src/reproseed").glob("*.py")),
+        source / PROBE_PATH,
+        source / BRIDGE_PROBE_PATH,
+    ]
     if not paths or not (source / "src/reproseed/reducer.py").is_file():
         raise ValueError("source must contain the ReproSeed runtime")
     destination.mkdir()
@@ -211,7 +253,7 @@ def worker(source: Path, directory: Path, mutation: Mutation, line: int) -> dict
     record = {"boundary_reached": False, "test": mutation.test}
     started = time.monotonic()
     try:
-        namespace = runpy.run_path(str(source / PROBE_PATH))
+        namespace = runpy.run_path(str(source / mutation.probe))
         imports = {}
         for name, module in tuple(sys.modules.items()):
             if name.startswith("reproseed.") and getattr(module, "__file__", None):
@@ -347,7 +389,7 @@ def campaign(
     if not 1 <= len(selected) <= len(MUTATIONS) or len({item.name for item in selected}) != len(
         selected
     ):
-        raise ValueError("select 1 to 10 distinct known mutations")
+        raise ValueError("select 1 to 13 distinct known mutations")
     if any(item not in MUTATIONS for item in selected):
         raise ValueError("only the finite declared mutations are accepted")
     if not directory.parent.is_dir():

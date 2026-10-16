@@ -69,3 +69,13 @@ jobs:
         run: |
           uv run --locked python tests/external_consumer_smoke.py \
             --wheel dist/reproseed-0.1.0-py3-none-any.whl --existing-applications
+      - name: Acquire exact locked pytest wheels for offline consumers
+        run: |
+          uv run --locked python tests/pytest_wheelhouse.py \
+            --directory .validation/pytest-wheels
+      - name: Exercise the small optional pytest bridge from the installed wheel
+        run: |
+          uv run --locked python tests/pytest_bridge_smoke.py \
+            --wheel dist/reproseed-0.1.0-py3-none-any.whl \
+            --wheelhouse .validation/pytest-wheels \
+            --evidence .validation/pytest-wheel-smoke.json

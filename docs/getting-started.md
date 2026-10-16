@@ -1,5 +1,10 @@
 # Getting started with ReproSeed
 
+For an existing failing pytest test, use the separate [pytest oracle guide](pytest-oracles.md)
+and its complete duplicate-export preparation recipe. It requires optional separately
+installed pytest and an exact nodeid/exception/message contract. The tutorial below
+retains its ordinary dependency-free oracle and synchronized files.
+
 ReproSeed reduces a disposable SQLite fixture while preserving one specified
 data-dependent failure. The output is a small database, explicitly selected
 application/oracle files, a portable replay configuration and recorded evidence.

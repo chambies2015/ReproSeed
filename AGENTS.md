@@ -1,6 +1,6 @@
 # Engineering guidance
 
-ReproSeed M2f is a local Python 3.12+ CLI with a standard-library-only runtime.
+ReproSeed M2g is a local Python 3.12+ CLI with a standard-library-only mandatory runtime.
 Architecture and scope are described in docs/architecture.md and docs/roadmap.md.
 
 ## Module boundaries
@@ -9,6 +9,9 @@ Architecture and scope are described in docs/architecture.md and docs/roadmap.md
 - sqlite_adapter.py owns read-only snapshots, schema inspection, dependency closures,
   private candidate construction, validation and compact export.
 - oracle.py stages disposable copies and classifies bounded subprocess executions.
+- pytest_oracle.py is an explicitly invoked optional bridge: strict target selection,
+  optional pytest loading, isolated session/fixture binding and complete structured
+  phase/session classification. It never changes the generic runner or reducer.
 - reducer.py owns deterministic row removal, normalized candidate caching and coherent
   committed search progress.
 - workflow.py owns confirmation counts, budgets and verification sequencing.
@@ -36,6 +39,12 @@ Use synthetic fixtures and real SQLite/subprocess integration tests. Preserve us
 - No claims of global minimality without an actual proof.
 - Tests and reports must reflect commands actually run.
 - Never accept an exit code without the configured exact marker on the configured stream.
+- The optional pytest target requires one exact nodeid, exception type/message, one
+  execution and successful setup/teardown plus a consistent completed session. Skip,
+  xfail, custom collectors, external plugins and incomplete evidence fail closed.
+- Import pytest/test/conftest only after bridge execution acknowledgement. Keep
+  pytest optional, control config/plugin discovery, reject reserved fixture overrides,
+  and preserve output-volume accounting without unbounded pytest capture.
 - Baseline/final verification needs three fresh confirmations; accepted reductions need two.
 - Reserve final verification capacity. Do not publish a verified bundle on failed confirmation.
 - Publish retained rows, acceptance evidence and attempt history as one coherent search state.
@@ -162,3 +171,16 @@ unstaged/uncommitted. See benchmarks/README.md for isolated comparisons and camp
 recipes and docs/m2f-completion.md for actual validation and limits. Freeze and hash
 one coherent source snapshot before final validation; hosted acceptance requires Dan's
 reviewed commit/push and the new commit's actual CI results.
+
+Accepted M2f is commit e14eaffbf4e3ddfc64df522b2660e0e9e8760039, hosted run
+38945054973 (Ubuntu/Python 3.12/3.14 and Windows/Python 3.12 passed).
+M2g authorizes only the explicit optional pytest bridge and complete integration
+workflow. Preserve historical reports, all version-1 formats and the M2f ten probes.
+Run the thirteen-probe disposable mutation recipe, one extended generated campaign,
+genuine historical compatibility and seven existing application scenarios. Add the
+small offline bridge wheel smoke to CI; keep the full 2,430-row pytest acceptance
+local/explicit. Test a dependency-free external consumer and one with explicitly
+installed supported pytest. Freeze/hash source before final gates and record platform,
+pytest-version and unavailable-runtime limits in docs/m2g-completion.md. Leave M2g
+unstaged/uncommitted. Hosted acceptance awaits Dan's reviewed commit and push.
+No publication, version change, automatic dependency installation or plugin framework.

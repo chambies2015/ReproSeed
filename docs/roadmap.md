@@ -255,6 +255,19 @@ only their tested invariants and scope; they are not a human study. Actual hoste
 Dan's reviewed M2f commit, unresolved critical defects and package/replay correctness
 remain technical gates. Leave M2f unstaged/uncommitted. No publication is authorized.
 
+## M2g — explicit pytest oracle integration
+
+M2f was accepted at `e14eaffbf4e3ddfc64df522b2660e0e9e8760039` in hosted run
+`38945054973` (Ubuntu/Python 3.12 and 3.14, Windows/Python 3.12). Its historical
+report remains unchanged. M2g adds an optional fail-closed bridge for one exact
+pytest nodeid/exception/message, isolated configuration/plugins, a disposable DB
+fixture and complete phase/session checks. It reuses the existing duplicate exporter
+for a complete test-driven workflow, with installed-wheel and semantic mutation checks.
+No mandatory dependency, version change, format migration or reducer/cache redesign.
+See [pytest oracles](pytest-oracles.md) and [M2g completion](m2g-completion.md).
+Leave all M2g changes unstaged/uncommitted for Dan. New hosted acceptance awaits his
+reviewed commit/push; accepted M2f CI does not validate this implementation.
+
 ## Next — limited-alpha decision
 
 Resolve technical gates, then Dan separately decides distribution/version/support.

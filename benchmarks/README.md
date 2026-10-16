@@ -1,5 +1,15 @@
 # ReproSeed performance lab
 
+M2g preserves these generated/reference recipes and the ten established semantic
+mutation probes. The same disposable mutation recipe now has thirteen probes,
+adding exact pytest message matching, finalizer completion and skipped-call rejection.
+Each bridge probe runs one real pytest session inside its isolated traced worker;
+clean controls must pass and both changed boundaries must execute before detection
+is credited. Invalid mutants, survivors and timeouts remain explicit results.
+Use a fresh directory with the existing `benchmarks/mutations.py` command.
+The integration milestone does not change cache policy or search ordering.
+See [M2g evidence](../docs/m2g-completion.md) and [pytest workflow](../docs/pytest-oracles.md).
+
 M2f extends this recipe with three isolated implementations: actual pre-M2e source
 (`27be3d46c31f752f8944eb6e78d0f743f4edb9cd`), accepted M2e source
 (`0b776c8f5002c846940e438207d582af2259bda6`) and the captured current source.
@@ -74,7 +84,7 @@ The real application oracle is reused; model predicates are explicitly synthetic
 not count as real CLI/subprocess lifecycles. Agreement with M2e supplements the independent
 SQL checks and cannot establish the absence of shared defects.
 
-The mutation recipe makes ten disposable source copies and applies one exact production
+The mutation recipe makes thirteen disposable source copies and applies one exact production
 boundary substitution per mutant. Its clean control and mutant execute the same targeted
 probe in isolated interpreters. Line tracing proves the changed boundary was reached;
 only a semantic assertion after a successful clean control counts as detection. Syntax,

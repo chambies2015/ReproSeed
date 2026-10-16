@@ -1,5 +1,22 @@
 # Trust boundaries
 
+The optional [pytest bridge](docs/pytest-oracles.md) runs only when explicitly selected
+and acknowledged. Its target file is bounded and strict; exact structured exception
+type/message and complete successful setup/teardown are required. Missing/unsupported
+pytest fails before importing target/conftest code. Static diagnosis and inspection
+do not import pytest. Collection itself executes code. The reserved `reproseed_db`
+fixture uses an additional owned snapshot and rejects local overrides.
+
+Controlled root/config/conftest boundaries and disabled third-party autoload avoid
+inheriting an unrelated pytest ecosystem. Explicit external plugins, reruns, xdist,
+custom collectors and skip/xfail behavior are unsupported. Output rendering/capture
+is disabled; remaining pytest/test output is discarded in bounded streaming chunks
+while fixed output-volume records keep excessive output visible to the outer byte
+limit. Bridge diagnostics use fixed reasons. This is not a general output sanitizer:
+trusted code retains OS access and can bypass normal output mechanisms. Included
+tests/application/target/conftest files remain explicit assets. Installed ReproSeed
+and pytest invoked via `-m` are external dependencies outside manifest authentication.
+
 ReproSeed runs the exact command selected in configuration. reduce, replay and executable diagnose require
 --allow-exec because that command executes with your OS permissions and inherited
 environment. shell=False prevents shell interpretation; it does not make code safe.

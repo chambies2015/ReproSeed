@@ -1,0 +1,4 @@
+adapter_version = 1
+nodeid = "test_export.py::test_cross_project_names"
+exception = "builtins.AssertionError"
+message = "cross-project export lost an entry"
