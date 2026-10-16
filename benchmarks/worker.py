@@ -19,6 +19,19 @@ from collections.abc import Mapping
 from contextlib import closing
 from pathlib import Path
 
+SPARSE_BOUNDARY = 32
+SHAPES = (
+    "dense",
+    "sparse",
+    "repeated",
+    "threshold_below",
+    "threshold_at",
+    "threshold_above",
+    "mixed",
+    "dense_to_sparse",
+    "sparse_protocol",
+)
+
 
 def provenance(source):
     import reproseed.reducer as reducer
@@ -76,13 +89,71 @@ def row_ids(n):
     )
 
 
+def selection(rows, shape, index, count, full=None):
+    """One bounded, shared workload definition for every archived implementation."""
+    n = len(rows)
+    if shape.startswith("threshold_"):
+        offset = {"threshold_below": -1, "threshold_at": 0, "threshold_above": 1}[shape]
+        size = min(n - 1, SPARSE_BOUNDARY + offset)
+        start = index % max(1, n - size)
+        return frozenset(rows[start : start + size])
+    if shape == "dense_to_sparse":
+        return frozenset(rows[: max(1, n // (2 ** min(index + 1, 32)))])
+    if shape == "mixed":
+        # Same sparse key both before and after the first packed candidate;
+        # dense duplicates also cross later sparse/dense transitions.
+        phase = index % 6
+        offset = 0 if phase in (0, 3) else 1 if phase in (1, 5) else 2
+        subset = frozenset(rows[offset : offset + min(16, max(1, n // 4))])
+        return (frozenset(rows) if full is None else full) - subset if phase in (2, 4) else subset
+    index = index % max(1, count // 3) if shape == "repeated" else index
+    subset = frozenset(rows[index : index + min(16, max(1, n // 4))])
+    return (
+        subset
+        if shape in {"sparse", "sparse_protocol"}
+        else (frozenset(rows) if full is None else full) - subset
+    )
+
+
+def closure_selection(rows, shape, index, count, retained):
+    # Match the established benchmark's tiny dense deletion closure; avoid
+    # charging an extra synthetic full-universe allocation to every candidate.
+    if shape in {"dense", "repeated"}:
+        start = index % max(1, count // 3) if shape == "repeated" else index
+        return frozenset(rows[start : start + min(16, max(1, len(rows) // 4))])
+    if shape == "mixed" and index % 6 in (2, 4):
+        return frozenset(rows[2 : 2 + min(16, max(1, len(rows) // 4))])
+    return retained - selection(rows, shape, index, count, full=retained)
+
+
+def encoder_for(reducer, rows, universe):
+    """Use a new shared-membership interface when present, preserving old sources."""
+    import inspect
+
+    encoder_class = getattr(reducer, "_CandidateEncoding", None)
+    if encoder_class is None:
+        return None
+    if "universe" in inspect.signature(encoder_class).parameters:
+        return encoder_class(rows, universe=universe)
+    return encoder_class(rows)
+
+
 def cache_sample(n, shape, count, traced):
     from reproseed.reducer import BudgetExhausted, Evaluation, reduce_rows
-    from reproseed.sqlite_adapter import row_sort_key
+    from reproseed.sqlite_adapter import DatabaseModel, row_sort_key
 
     rows = tuple(sorted(row_ids(n), key=row_sort_key))
     excluded = {id(v) for row in rows for v in (row, row[0], row[1])}
     excluded.update(id(v) for row in rows if isinstance(row[1], tuple) for v in row[1])
+    base_model = None if shape == "sparse_protocol" else DatabaseModel(rows, (), {})
+    universe = getattr(base_model, "row_universe", getattr(base_model, "_row_universe", None))
+    partitions = getattr(base_model, "_rows_by_table", None)
+    model_indexes = size_owned(universe, excluded) if universe is not None else 0
+    if partitions is not None:
+        model_indexes += size_owned(partitions, excluded) + sys.getsizeof(dict(partitions))
+    shared = {id(rows)}
+    if universe is not None and shape != "sparse_protocol":
+        shared.add(id(universe))
     captured = {}
     calls = 0
 
@@ -91,18 +162,22 @@ def cache_sample(n, shape, count, traced):
             self.rows = rows
             self.index = 0
 
+        @property
+        def row_universe(self):
+            return None if shape == "sparse_protocol" else universe
+
         def deletion_closure(self, seeds, retained):
             if self.index >= count:
                 raise BudgetExhausted
-            index = self.index % max(1, count // 3) if shape == "repeated" else self.index
+            index = self.index
             self.index += 1
-            subset = frozenset(rows[index : index + min(16, max(1, n // 4))])
-            return retained - subset if shape == "sparse" else subset
+            return closure_selection(rows, shape, index, count, retained)
 
     def evaluate(candidate):
         nonlocal calls
         calls += 1
-        return Evaluation("PASS", reason="synthetic_pass")
+        outcome = "TARGET_FAILURE" if shape == "dense_to_sparse" else "PASS"
+        return Evaluation(outcome, reason="synthetic_" + outcome.lower())
 
     def trace(frame, event, arg):
         if event == "return" and frame.f_code is reduce_rows.__code__:
@@ -110,7 +185,9 @@ def cache_sample(n, shape, count, traced):
                 tracemalloc.get_traced_memory()
             )
             cache = frame.f_locals["cache"]
-            captured["cache"] = size_owned(cache, excluded)
+            owned_exclusions = excluded | shared
+            owned_seen = set()
+            captured["cache"] = size_owned(cache, owned_exclusions, owned_seen)
             encoder = frame.f_locals.get("encoding") or frame.f_locals.get("encoder")
             # Read the actual production encoder, not an imitation of its representation.
             if encoder is None:
@@ -122,7 +199,32 @@ def cache_sample(n, shape, count, traced):
                     ),
                     None,
                 )
-            captured["index"] = 0 if encoder is None else size_owned(encoder, excluded)
+            captured["index"] = (
+                0 if encoder is None else size_owned(encoder, owned_exclusions, owned_seen)
+            )
+            captured["encoder_reachable_bytes"] = (
+                0 if encoder is None else size_owned(encoder, excluded)
+            )
+            captured["shared_preexisting_rows_tuple_bytes"] = sys.getsizeof(rows)
+            captured["shared_preexisting_model_index_bytes"] = model_indexes
+            captured["model_plus_cache_index_bytes"] = (
+                model_indexes + captured["cache"] + captured["index"]
+            )
+            captured["encoder_retains_rows_tuple"] = encoder is not None and any(
+                value is rows for value in vars(encoder).values()
+            )
+            captured["encoder_retains_model_universe"] = (
+                encoder is not None
+                and universe is not None
+                and any(value is universe for value in vars(encoder).values())
+            )
+            captured["shared_reference_lifetime"] = (
+                "Existing model and model.rows remain live throughout reduce_rows; "
+                "shared encoder references do not extend their measured search lifetime."
+            )
+            captured["ordinal_index_initialized"] = (
+                encoder is not None and getattr(encoder, "ordinals", None) is not None
+            )
             captured["keys"] = sum(sys.getsizeof(key) for key in cache)
         return trace if frame.f_code is reduce_rows.__code__ else None
 
@@ -142,6 +244,10 @@ def cache_sample(n, shape, count, traced):
         "candidate_count": count,
         "evaluations": calls,
         "cache_hits": result.cache_hits,
+        "accepted_changes": len(result.accepted),
+        "retained_rows": len(result.retained),
+        "membership_interface": "protocol_fallback" if shape == "sparse_protocol" else "model",
+        "representation_workload_boundary": SPARSE_BOUNDARY,
         "seconds": seconds,
         "traced": traced,
         **captured,
@@ -235,28 +341,82 @@ def model_memory_sample(path, n):
     }
 
 
-def encoding_sample(n, shape, count):
-    """Time only the actual production identity conversion, outside tracing."""
+def encoding_sample(n, shape, count, traced=False):
+    """Separate initialization, conversion and temporary Python allocations."""
     import reproseed.reducer as reducer
+    from reproseed.sqlite_adapter import DatabaseModel
 
     rows = row_ids(n)
     full = frozenset(rows)
-    encoder_class = getattr(reducer, "_CandidateEncoding", None)
-    encoder = encoder_class(rows) if encoder_class else None
+    model = None if shape == "sparse_protocol" else DatabaseModel(rows, (), {})
+    universe = getattr(model, "row_universe", getattr(model, "_row_universe", None))
+    if shape == "sparse_protocol":
+        universe = None
+    initialization_start = time.perf_counter()
+    if traced:
+        gc.collect()
+        tracemalloc.start()
+    encoder = encoder_for(reducer, rows, universe)
+    initialization_seconds = time.perf_counter() - initialization_start
+    initialization_bytes = tracemalloc.get_traced_memory() if traced else None
+    if traced:
+        tracemalloc.stop()
     elapsed = 0.0
+    operations = []
+    remembered = {}
     for i in range(count):
-        index = i % max(1, count // 3) if shape == "repeated" else i
-        subset = frozenset(rows[index : index + min(16, max(1, n // 4))])
-        candidate = subset if shape == "sparse" else full - subset
+        candidate = selection(rows, shape, i, count, full=full)
+        initialized_before = encoder is not None and getattr(encoder, "ordinals", None) is not None
+        if traced:
+            tracemalloc.start()
         start = time.perf_counter()
         key = candidate if encoder is None else encoder.encode(candidate)
         elapsed += time.perf_counter() - start
+        allocations = tracemalloc.get_traced_memory() if traced else None
+        if traced:
+            tracemalloc.stop()
+        # Compare actual exact equality across history, including sparse keys
+        # first observed before lazy initialization. No hash-only matching.
+        duplicate_group = None
+        if shape == "mixed":
+            duplicate_group = (0, 1, 2, 0, 2, 1)[i % 6]
+        elif shape == "repeated":
+            duplicate_group = i % max(1, count // 3)
+        if duplicate_group is not None:
+            if duplicate_group in remembered:
+                assert remembered[duplicate_group] == key
+            else:
+                remembered[duplicate_group] = key
+        operations.append(
+            {
+                "candidate_rows": len(candidate),
+                "key_type": type(key).__name__,
+                "key_shallow_bytes": sys.getsizeof(key),
+                "ordinal_index_before": initialized_before,
+                "ordinal_index_after": encoder is not None
+                and getattr(encoder, "ordinals", None) is not None,
+                "current_traced_bytes": None if allocations is None else allocations[0],
+                "peak_traced_bytes": None if allocations is None else allocations[1],
+                "scratch_peak_above_retained_bytes": None
+                if allocations is None
+                else (max(0, allocations[1] - allocations[0])),
+            }
+        )
         assert key is not None
     return {
         "rows": n,
         "shape": shape,
         "candidate_count": count,
         "encoding_seconds": elapsed,
+        "initialization_seconds": initialization_seconds,
+        "initialization_current_traced_bytes": None
+        if initialization_bytes is None
+        else initialization_bytes[0],
+        "initialization_peak_traced_bytes": None
+        if initialization_bytes is None
+        else initialization_bytes[1],
+        "traced": traced,
+        "operations": operations,
         "encoder": "frozenset_identity" if encoder is None else type(encoder).__name__,
     }
 
@@ -278,8 +438,9 @@ def differential(seed):
         "budget",
         "nonmonotonic",
         "invalid_unresolved",
+        "cache_boundary",
     ):
-        count = 0 if name == "empty" else 36
+        count = 0 if name == "empty" else 96 if name == "cache_boundary" else 36
         rows = (
             tuple(("scalar", index) for index in range(count))
             if name == "scalar"
@@ -300,19 +461,40 @@ def differential(seed):
         considered = []
         calls = 0
         actual_closure = model.deletion_closure
+        actual_universe = getattr(model, "row_universe", getattr(model, "_row_universe", None))
 
         class RecordingModel:
-            def __init__(self, rows=rows, closure=actual_closure, log=considered):
+            def __init__(
+                self,
+                rows=rows,
+                closure=actual_closure,
+                log=considered,
+                universe=actual_universe,
+                scenario=name,
+            ):
                 self.rows = rows
                 self.closure = closure
                 self.log = log
                 self.transitions = 0
+                self.universe = universe
+                self.scenario = scenario
+
+            @property
+            def row_universe(self):
+                return self.universe
 
             def deletion_closure(self, seeds, retained):
                 self.transitions += 1
                 if self.transitions > 500:
                     raise AssertionError("differential scenario exceeded finite transition cap")
-                closure = self.closure(seeds, retained)
+                if self.scenario == "cache_boundary":
+                    if self.transitions > 24:
+                        raise BudgetExhausted
+                    closure = closure_selection(
+                        self.rows, "mixed", self.transitions - 1, 24, retained
+                    )
+                else:
+                    closure = self.closure(seeds, retained)
                 self.log.append(sorted(retained - closure, key=row_sort_key))
                 return closure
 
@@ -322,7 +504,7 @@ def differential(seed):
                 raise BudgetExhausted
             calls += 1
             evaluated.append(sorted(candidate, key=row_sort_key))
-            if name == "irreducible":
+            if name in {"irreducible", "cache_boundary"}:
                 outcome = "PASS"
             elif name == "invalid_unresolved" and len(candidate) % 5 == 0:
                 outcome = "DATABASE_INVALID"
@@ -388,6 +570,10 @@ def real_sample(fixture, directory, observe, record_identities):
     def recording_reduce(model, evaluate, *args, **kwargs):
         class Model:
             rows = model.rows
+
+            @property
+            def row_universe(self):
+                return getattr(model, "row_universe", getattr(model, "_row_universe", None))
 
             def deletion_closure(self, seeds, retained):
                 closure = model.deletion_closure(seeds, retained)
@@ -486,6 +672,8 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.repetitions <= 5 or not 3 <= args.candidates <= 64:
         parser.error("repetitions must be 1..5 and candidates 3..64")
+    if not 1 <= len(args.sizes) <= 3 or len(set(args.sizes)) != len(args.sizes):
+        parser.error("choose one to three distinct sizes")
     if any(not 16 <= n <= 100000 or n % 4 for n in args.sizes):
         parser.error("sizes must be multiples of four from 16..100000")
     if args.memory_only and args.timing_only:
@@ -504,13 +692,14 @@ def main():
     else:
         result.update(cache=[], model=[], model_memory=[], encoding=[])
         for n in args.sizes:
-            for shape in ("dense", "sparse", "repeated"):
+            for shape in SHAPES:
                 if not args.memory_only:
                     for _ in range(args.repetitions):
                         result["cache"].append(cache_sample(n, shape, args.candidates, False))
                         result["encoding"].append(encoding_sample(n, shape, args.candidates))
                 if not args.timing_only:
                     result["cache"].append(cache_sample(n, shape, args.candidates, True))
+                    result["encoding"].append(encoding_sample(n, shape, args.candidates, True))
             path = args.directory / f"model-{n}.sqlite3"
             database(path, n)
             if not args.memory_only:

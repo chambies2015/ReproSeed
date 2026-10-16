@@ -20,7 +20,8 @@ and Linux shell commands; its consumer workflow needs no uv, editable install or
 after obtaining the wheel. No public package-index installation is claimed.
 
 ReproSeed remains a prototype. The [limited-alpha readiness review](docs/alpha-readiness.md)
-records a conditional go, pending hosted validation, outside-user feedback and a distribution decision.
+records a conditional go, pending M2f hosted validation and a separate distribution decision.
+Independent human usability remains untested and advisory, not a development gate.
 It requires Python 3.12+ and SQLite 3.37+, supports a
 [bounded SQLite schema subset](docs/architecture.md#supported-schema), and runs configured
 code with your OS permissions when you supply `--allow-exec`. Reduction is not
@@ -291,5 +292,5 @@ Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12 all passed.
 [M2d completion evidence](docs/m2d-completion.md) records the simulated consumer journey and
 [limited-alpha readiness decision](docs/alpha-readiness.md). Hosted validation of M2d remains
 pending Dan's review, commit and push. Historical completion reports remain unchanged.
-Independent outside-user feedback precedes further speculative schema expansion;
+Further speculative schema expansion requires a separate scope decision;
 PostgreSQL and publication remain separate future work.

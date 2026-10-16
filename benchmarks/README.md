@@ -1,5 +1,95 @@
 # ReproSeed performance lab
 
+M2f extends this recipe with three isolated implementations: actual pre-M2e source
+(`27be3d46c31f752f8944eb6e78d0f743f4edb9cd`), accepted M2e source
+(`0b776c8f5002c846940e438207d582af2259bda6`) and the captured current source.
+`--accepted-ref` selects the second archive explicitly. Small shallow-checkout
+mechanics runs use both `--baseline-ref HEAD --accepted-ref HEAD`; these are not
+historical performance evidence. All historical [M2e observations](../docs/performance.md)
+remain labeled with their original source and runtime.
+
+The extended workloads add 31/32/33 retained identities, mixed sparse/dense candidates,
+duplicates before and after ordinal initialization, dense-to-sparse shrinkage and a
+protocol caller without the model membership interface. The current policy uses exact
+frozensets up to 32 rows and packed bytes above 32, with lazy ordinal construction.
+Existing model membership and row tuples are shared and remain live through search.
+Storage fields distinguish incremental cache/encoder ownership, reachable shared
+references, existing model indexes and their combined cost. A dense invocation retains
+its ordinal map when later selections become sparse; sparse-only savings must not be
+applied to that mixed lifetime. Per-encoding traced samples distinguish initialization,
+retained allocations and scratch peaks; ordinary repetitions remain untraced.
+
+## Generated correctness and mutation sensitivity
+
+These are developer recipes, not public ReproSeed commands. They require only the
+standard library after development tools are installed, except mutation probes import
+the installed pytest development dependency. Each output parent must exist and the
+output directory must be new. No retry or overwrite option is provided.
+
+```sh
+uv run --locked python benchmarks/campaign.py --directory .validation/m2f-smoke-fresh --profile smoke --seed 104729
+uv run --locked python benchmarks/campaign.py --directory .validation/m2f-extended-fresh --profile extended --seed 104729
+uv run --locked python benchmarks/mutations.py --directory .validation/m2f-mutations-fresh
+```
+
+Smoke selects eight supported fixtures, eight deliberate unsupported/invalid variants,
+24 seeded model searches and one real billing lifecycle per implementation. Extended
+selects 128 supported fixtures, 64 deliberate variants, 1,000 model searches and 24 real
+billing lifecycles per implementation. Accepted M2e and the frozen new sources run in
+separate isolated interpreters on identical generated inputs. Source/import hashes,
+generator version, template, seed, input/config hashes and exact single-case replay argv
+are recorded in `results.json`; raw synthetic inputs and failures remain beside it.
+`--case supported:0` (or `unsupported`, `model`, `lifecycle`) replays one ordinal with
+the same `--seed`. Use each saved `replay_command` to select the captured sources and
+recipe rather than silently regenerating a case against different code.
+
+The four layouts are ordinary/STRICT rowid and ordinary/STRICT WITHOUT ROWID. All six
+scalar/composite INTEGER/TEXT key shapes occur, along with independent FK groups,
+partial NULLs, cycles, self-links, tenant partial identifiers, empty/unrelated tables,
+quoted/Unicode keys and indexes/actions. Authored structured templates drive full-key
+SQLite joins with the parent on the left; a separate fixed-point scan supplies expected
+closures. No expected edge comes from adapter internals. Values, schema/index metadata,
+integrity and FKs are checked after actual materialization. Tiny universes enumerate seed
+subsets and independently enumerate valid retained subsets; only a bounded sample is
+materialized. Counters distinguish these from CLI commands and oracle subprocesses.
+Valid SQLite schemas outside ReproSeed's policy and SQLite DDL rejections are separate
+classifications. Diagnose/reduce rejection cases assert zero launches and no bundle.
+
+The finite controls reject excessive counts, seeds, subsets, materializations, deadlines
+and artifact-stop-threshold values before fixture allocation. `--artifact-limit-mib` is
+checked between bounded workers; retained files may exceed it by one finite batch plus
+growth of aggregate result JSON. Finite case/fixture counts and log/result sizes bound
+retained work; the threshold is not a strict process-memory or filesystem maximum.
+Worker logs and results have explicit limits, workers have deadlines, and the driver
+preserves failed/skipped cases.
+Defaults allow 256 tiny subsets, three materializations per fixture and 180 seconds per
+batch worker. Large campaigns stay outside ordinary CI. The CI smoke can archive HEAD
+in a shallow checkout; that checks mechanics without claiming historical equivalence.
+
+Metamorphic evidence states its invariant: insertion reversal preserves exact rows/schema
+and search inputs; disconnected rows, bijective key/reference renaming and compatible
+storage variants preserve fixture validity and target outcome. They need not select the
+same minimal fixture. Correcting the genuine billing defect must remove the outcome.
+The real application oracle is reused; model predicates are explicitly synthetic and do
+not count as real CLI/subprocess lifecycles. Agreement with M2e supplements the independent
+SQL checks and cannot establish the absence of shared defects.
+
+The mutation recipe makes ten disposable source copies and applies one exact production
+boundary substitution per mutant. Its clean control and mutant execute the same targeted
+probe in isolated interpreters. Line tracing proves the changed boundary was reached;
+only a semantic assertion after a successful clean control counts as detection. Syntax,
+import/setup errors are invalid; unknown timeouts are unresolved; survivors stay visible.
+`mutations.json` records each boundary, invariant, test, hashes, assertion, classification,
+timeout and replay command. `--mutation NAME` selects one finite mutant; `--timeout`
+is bounded to 5..120 seconds. Working runtime hashes are rechecked after the campaign.
+Mutated copies, generated fixtures and logs remain ignored and are excluded from packages.
+
+Automated evidence establishes bounded tested invariants. Human usability remains
+NOT TESTED/advisory. Neither recipe authorizes publication or replaces the actual hosted
+M2f gate. See [M2f completion](../docs/m2f-completion.md) for actual counts and limits.
+
+## Measurement mechanics
+
 This standard-library recipe compares actual archived Python sources with an isolated
 snapshot of the current `src/` and synthetic `examples/`. It never imports both versions
 into one process. Each `-I` worker inserts exactly its selected `source/src`, asserts the
@@ -28,7 +118,7 @@ The command exits nonzero on a worker failure or semantic mismatch.
 The complete run contains:
 
 - Cache/model workloads at 10,000, 50,000 and 100,000 rows; 24 candidates; three untraced
-  timing repetitions with alternating baseline/new order, followed by separate traced
+  timing repetitions in recorded three-way rotating/reversed order, followed by separate traced
   allocation samples. All four supported INTEGER/TEXT/composite/mixed WITHOUT ROWID
   identity shapes occur. Cache cases use 24 dense distinct selections, 24 sparse
   selections, and eight dense selections repeated three times. Dense candidates omit
@@ -54,8 +144,8 @@ The complete run contains:
   Duplicate export receives unique harmless entries; mixed WITHOUT ROWID billing
   receives complete safe invoice/line/payment/refund decoys. The genuine existing
   semantic oracles and their unchanged explicit 400/260 invocation budgets are used.
-  Each domain runs an instrumented baseline/new semantic pair, then separate ordinary
-  baseline/new timings, then ordinary new-code timing with text progress enabled.
+  Each domain runs an instrumented three-way semantic comparison, then separate ordinary
+  timings for all three sources, then ordinary new-code timing with text progress enabled.
   Instrumented runs record full candidate identities outside the public telemetry.
   Every run uses the unchanged strict bundle reader, integrity/FK checks, three fresh
   final confirmations and three fresh relocated replay confirmations while original
@@ -79,7 +169,7 @@ Other bounded modes and controls:
 uv run --locked python benchmarks/lab.py --directory .validation/m2e-micro-fresh --mode micro --sizes 10000 50000 100000 --repetitions 3 --candidates 24
 uv run --locked python benchmarks/lab.py --directory .validation/m2e-differential-fresh --mode differential
 uv run --locked python benchmarks/lab.py --directory .validation/m2e-real-fresh --mode real --real-rows 20000
-uv run --locked python benchmarks/lab.py --directory .validation/m2e-small-fresh --mode smoke --baseline-ref HEAD
+uv run --locked python benchmarks/lab.py --directory .validation/m2f-small-fresh --mode smoke --baseline-ref HEAD --accepted-ref HEAD
 ```
 
 `smoke` uses 64 model/cache rows and the 11-row threshold application, and can archive

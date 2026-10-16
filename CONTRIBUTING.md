@@ -1,14 +1,15 @@
 # Contributing
 
-M2e's opt-in observation and exact-cache changes have a separate bounded
+M2f's generated correctness, mutation sensitivity and exact-cache changes have bounded
 [performance/differential recipe](benchmarks/README.md). Use fresh output directories,
 verify each worker's imported source provenance, separate timing from tracing, and
 freeze runtime/test/recipe files before integrated validation. Large performance
 runs stay outside ordinary CI. The small installed-wheel consumer exercises progress
 and events alongside unchanged JSON/text inspection and relocated replay. Accepted
-M2d.1 is commit `27be3d46c31f752f8944eb6e78d0f743f4edb9cd`, hosted run
-`38623620343`; its Windows ACL-denial test was capability-skipped. M2e remains
-unstaged/uncommitted and awaits a new hosted gate after Dan's review.
+M2e is commit `0b776c8f5002c846940e438207d582af2259bda6`, hosted run
+`38901295778`. M2d.1's hosted Windows ACL-denial test was capability-skipped.
+M2f remains unstaged/uncommitted and awaits its actual hosted gate after Dan's review.
+Human usability is NOT TESTED/advisory, not an implementation or technical-acceptance gate.
 
 Install Python 3.12+ and uv. Runtime dependencies are standard library only. Development
 tools are resolved in uv.lock; do not hand-edit it. Use synthetic data exclusively.
@@ -21,6 +22,9 @@ uv run mypy
 uv run mypy --platform linux
 uv run --locked python -c "from pathlib import Path; Path('.validation').mkdir(exist_ok=True)"
 uv run pytest --basetemp=.validation/pytest
+uv run --locked python benchmarks/campaign.py --directory .validation/m2f-generated-smoke-fresh --profile smoke --seed 104729
+uv run --locked python benchmarks/campaign.py --directory .validation/m2f-generated-extended-fresh --profile extended --seed 104729
+uv run --locked python benchmarks/mutations.py --directory .validation/m2f-mutations-fresh
 uv run pytest tests/test_without_rowid.py tests/test_composite_keys.py tests/test_text_keys.py tests/test_diagnose_cli.py tests/test_diagnostics.py tests/test_realistic_acceptance.py --basetemp=.validation/pytest-focused
 uv run --locked python tests/milestone_smoke.py --directory .validation/m2c-measurements-fresh
 uv run --locked python tests/milestone_smoke.py --directory .validation/m2c-without-rowid-measurements-fresh --examples composite_billing --without-rowid-billing-fixture
@@ -41,6 +45,22 @@ Required acceptance tests use real database files and subprocesses. A symlink te
 Windows Developer Mode or symlink privileges; POSIX signal tests run only on POSIX. Record
 skips and environment failures honestly. CI covers Linux Python 3.12/3.14 and Windows 3.12;
 configuration alone is not evidence of a successful hosted run.
+
+Freeze and hash executable source, tests, generators, recipes, lock/configuration and CI
+before final validation. The generated campaign retains raw synthetic failures before
+assertions, independently joins complete parent keys in SQLite and compares a separate
+reference traversal. Its exhaustive subset counts, model checks, materializations, in-process
+CLI calls and actual subprocess counts are separate evidence. The extended campaign and
+ten-mutant sensitivity run are explicit local gates; ordinary CI uses the small smoke and
+the focused tests. Preserve invalid mutants, survivors and timeouts in reports. Run exact
+saved single-case commands from retained captures, with a new output directory.
+
+For slower network checkouts, an owned local temporary output can reduce fixture I/O;
+retain that root because replay commands name its captured sources. Copy results and raw
+synthetic evidence to ignored `.validation` without deleting the original root. If a clean
+copy lacks Git metadata, use the original read-only `GIT_DIR`, `GIT_WORK_TREE=<clean-copy>`
+and `GIT_OPTIONAL_LOCKS=0` for historical archive recipes; imports must still originate in
+the selected captured source or verified installed wheel.
 
 After building, use the external-consumer smoke above. It accepts one concrete wheel,
 creates a fresh standard-library `venv` outside the checkout, and installs with that
@@ -175,9 +195,9 @@ with Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12 successful.
 M2c was accepted at commit `dd3db90eee65ed10e158cdcc9ef16b8a677e9852` in
 [hosted run 38599450878](https://github.com/chambies2015/ReproSeed/actions/runs/38599450878),
 with Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12 passed.
-Historical completion reports stay unchanged; hosted M2e acceptance awaits Dan's
+Historical completion reports stay unchanged; hosted M2f acceptance awaits Dan's
 subsequent commit/push. Accepted M2d.1 evidence is recorded above. See [alpha readiness](docs/alpha-readiness.md) and
 [M2d evidence](docs/m2d-completion.md) for the internal simulation and remaining gates.
-An actual limited-alpha decision and independent outside-user feedback precede broader
-schema/adapters. Do not implement PostgreSQL, LLM integration or web UI, publish packages,
+Broader schema/adapters require a separate scope decision. Independent human feedback is
+advisory and no human study is claimed. Do not implement PostgreSQL, LLM integration or web UI, publish packages,
 or call the prototype production-ready.

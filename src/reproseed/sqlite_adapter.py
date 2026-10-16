@@ -218,6 +218,11 @@ class DatabaseModel:
             counts[table] += 1
         return counts
 
+    @property
+    def row_universe(self) -> frozenset[RowId]:
+        """Borrow immutable membership without constructing another full-universe index."""
+        return self._row_universe
+
     def _check_rows(self, selected: Set[RowId]) -> None:
         if not selected <= self._row_universe:
             raise DatabaseError("Row identities do not belong to this pristine database model")

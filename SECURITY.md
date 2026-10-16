@@ -108,8 +108,9 @@ not a complete execution ledger, proof of reproduction or a resume point.
 Synchronous writes can still stall at the OS level; path checks do not promise
 hostile-filesystem race immunity. See [progress/events](docs/progress-events.md).
 
-Candidate caches use exact fixed-width membership bytes with deterministic ordinals
-scoped to one model. Hash-table lookup checks complete byte equality; no fingerprint
+Candidate caches use bounded exact sparse identity sets (at most 32 rows) or exact
+fixed-width membership bytes with lazy deterministic ordinals
+scoped to one model. Hash-table lookup checks complete key equality; no fingerprint
 substitutes for identity. This reduces dense cache ownership but does not impose a
 process memory limit: models, selections, attempt evidence, SQLite and subprocesses
 consume additional memory.

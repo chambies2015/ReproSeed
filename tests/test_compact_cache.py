@@ -41,59 +41,236 @@ def test_canonical_encoding_preserves_exact_typed_declared_identities() -> None:
     )
     first = reducer._CandidateEncoding(rows)
     second = reducer._CandidateEncoding(tuple(reversed(rows)))
-    assert first.ordinals == second.ordinals
-    assert tuple(sorted(first.ordinals, key=first.ordinals.__getitem__)) == tuple(
-        sorted(rows, key=row_sort_key)
-    )
-    seen: dict[bytes, frozenset[RowId]] = {}
+    assert first.ordinals is second.ordinals is None
+    seen: dict[reducer._CacheKey, frozenset[RowId]] = {}
     for width in range(len(rows) + 1):
         for subset in itertools.combinations(rows, width):
             candidate = frozenset(subset)
             key = first.encode(candidate)
-            assert isinstance(key, bytes)
+            assert isinstance(key, frozenset)
             assert key == second.encode(candidate)
             assert key not in seen
             seen[key] = candidate
     assert len(seen) == 2 ** len(rows)
+    assert first.ordinals is second.ordinals is None
 
 
-@pytest.mark.parametrize("size", [0, 1, 7, 8, 9, 15, 16, 17, 100])
+@pytest.mark.parametrize("size", [0, 1, 7, 8, 9, 15, 16, 17, 31, 32, 33, 100])
 def test_empty_full_sparse_dense_and_unused_bits(size: int) -> None:
     rows = tuple(("items", key) for key in range(size))
     encoding = reducer._CandidateEncoding(rows)
     width = (size + 7) // 8
-    assert encoding.byte_count == width
-    assert encoding.encode(frozenset()) == bytes(width)
+    assert encoding.encode(frozenset()) == frozenset()
+    assert encoding.ordinals is None
     full = encoding.encode(frozenset(rows))
-    assert len(full) == width
-    if size % 8:
-        assert full[-1] == (1 << (size % 8)) - 1
+    if size <= reducer._SPARSE_LIMIT:
+        assert full == frozenset(rows)
+        assert encoding.ordinals is None
+    else:
+        assert isinstance(full, bytes)
+        assert len(full) == width
+        if size % 8:
+            assert full[-1] == (1 << (size % 8)) - 1
     generator = random.Random(709)
     for _ in range(50):
         candidate = frozenset(row for row in rows if generator.randrange(4))
         key = encoding.encode(candidate)
-        decoded = frozenset(
-            row
-            for row, ordinal in encoding.ordinals.items()
-            if key[ordinal // 8] & (1 << (ordinal % 8))
-        )
+        if isinstance(key, bytes):
+            assert encoding.ordinals is not None
+            decoded = frozenset(
+                row
+                for row, ordinal in encoding.ordinals.items()
+                if key[ordinal // 8] & (1 << (ordinal % 8))
+            )
+            assert len(key) == width
+        else:
+            decoded = key
         assert decoded == candidate
-        assert len(key) == width
     for ordinal in (0, 7, 8, size - 1):
         if 0 <= ordinal < size:
             key = encoding.encode(frozenset({rows[ordinal]}))
-            assert key == bytes(ordinal // 8) + bytes([1 << (ordinal % 8)]) + bytes(
-                width - ordinal // 8 - 1
-            )
+            assert key == frozenset({rows[ordinal]})
 
 
 def test_duplicate_universe_entries_do_not_create_extra_ordinals() -> None:
     rows = Model().rows
     encoding = reducer._CandidateEncoding(rows + rows)
-    assert len(encoding.ordinals) == len(rows)
-    assert encoding.encode(frozenset(rows)) == b"\x07"
+    assert encoding.encode(frozenset(rows)) == frozenset(rows)
+    assert encoding.ordinals is None
+    large = tuple(("items", number) for number in range(100))
+    packed = reducer._CandidateEncoding(large + large)
+    assert packed.encode(frozenset(large)) == b"\xff" * 12 + b"\x0f"
+    assert packed.ordinals is not None and len(packed.ordinals) == 100
     with pytest.raises(KeyError):
         encoding.encode(frozenset({("items", 99)}))
+
+
+def test_threshold_history_and_iteration_order_cannot_change_identity() -> None:
+    rows: tuple[RowId, ...] = tuple(("t", number) for number in range(100)) + (
+        ("t", "42"),
+        ("other", 42),
+        ("pair", (42, "x")),
+        ("pair", ("42", "x")),
+    )
+    first = reducer._CandidateEncoding(rows, universe=frozenset(rows))
+    second = reducer._CandidateEncoding(reversed(rows))
+    sparse = frozenset(rows[:32])
+    packed = frozenset(rows[:33])
+    original_sparse = first.encode(sparse)
+    assert first.ordinals is None
+    assert isinstance(first.encode(packed), bytes)
+    assert first.ordinals is not None
+    assert first.encode(sparse) == original_sparse == second.encode(sparse)
+    assert second.ordinals is None
+    assert first.encode(packed) == second.encode(set(reversed(tuple(packed))))
+    assert first.ordinals == second.ordinals
+    assert tuple(sorted(first.ordinals, key=first.ordinals.__getitem__)) == tuple(
+        sorted(rows, key=row_sort_key)
+    )
+    seen: dict[reducer._CacheKey, frozenset[RowId]] = {}
+    generator = random.Random(1828)
+    for _ in range(300):
+        candidate = frozenset(generator.sample(rows, generator.randrange(len(rows) + 1)))
+        key = first.encode(candidate)
+        assert seen.setdefault(key, candidate) == candidate
+        assert key == second.encode(candidate)
+
+
+@pytest.mark.parametrize("dense", [False, True])
+@pytest.mark.parametrize("bad", [("t", True), ("t", 1.0), ("t", (1, False)), ("t", (1, 2, 3))])
+def test_unsupported_python_aliases_are_rejected(dense: bool, bad: RowId) -> None:
+    rows = tuple(("t", number) for number in range(100))
+    encoding = reducer._CandidateEncoding(rows, universe=frozenset(rows))
+    selected = set(rows[2:40]) if dense else set()
+    selected.add(bad)
+    with pytest.raises(ValueError, match="Unsupported row identity"):
+        encoding.encode(selected)
+
+
+@pytest.mark.parametrize("bad", [("t", True), ("t", 1.0), ("t", (1, False))])
+def test_unsupported_universe_cannot_alias_a_valid_sparse_candidate(bad: RowId) -> None:
+    with pytest.raises(ValueError, match="Unsupported row identity in candidate universe"):
+        reducer._CandidateEncoding((bad,)).encode(frozenset({("t", 1)}))
+
+
+@pytest.mark.parametrize("dense", [False, True])
+def test_foreign_candidates_are_rejected_in_either_representation(dense: bool) -> None:
+    rows = tuple(("t", number) for number in range(100))
+    encoding = reducer._CandidateEncoding(rows, universe=frozenset(rows))
+    selected = set(rows[:40]) if dense else set()
+    selected.add(("foreign", 1))
+    with pytest.raises(KeyError):
+        encoding.encode(selected)
+
+
+def test_lazy_construction_interrupt_never_publishes_a_partial_map() -> None:
+    rows = tuple(("t", number) for number in range(100))
+    encoding = reducer._CandidateEncoding(rows)
+    hit = False
+
+    def interrupt(frame: FrameType, event: str, argument: object) -> Any:
+        nonlocal hit
+        if (
+            event == "line"
+            and frame.f_code is reducer._CandidateEncoding._packed_ordinals.__code__
+            and frame.f_locals.get("ordinal") == 9
+        ):
+            hit = True
+            raise KeyboardInterrupt
+        return interrupt
+
+    previous = sys.gettrace()
+    try:
+        sys.settrace(interrupt)
+        with pytest.raises(KeyboardInterrupt):
+            encoding.encode(frozenset(rows))
+    finally:
+        sys.settrace(previous)
+    assert hit and encoding.ordinals is None
+    assert encoding.encode(frozenset(rows[:16])) == frozenset(rows[:16])
+    assert encoding.ordinals is None
+    assert encoding.encode(frozenset(rows)) == b"\xff" * 12 + b"\x0f"
+    assert encoding.ordinals is not None and len(encoding.ordinals) == 100
+
+
+def test_model_membership_is_borrowed_and_sparse_search_never_initializes_ordinals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source.sqlite3"
+    with closing(sqlite3.connect(source)) as connection:
+        connection.executescript("CREATE TABLE t(id INTEGER PRIMARY KEY)")
+        connection.executemany("INSERT INTO t VALUES(?)", ((number,) for number in range(24)))
+        connection.commit()
+    model = DatabaseModel.from_database(source)
+    assert model.row_universe is model._row_universe
+    captured: list[reducer._CandidateEncoding] = []
+    original = reducer._CandidateEncoding.encode
+
+    def encode(self: reducer._CandidateEncoding, selected: Set[RowId]) -> reducer._CacheKey:
+        assert self.rows is model.rows and self.universe is model.row_universe
+        captured.append(self)
+        return original(self, selected)
+
+    monkeypatch.setattr(reducer._CandidateEncoding, "encode", encode)
+    reducer.reduce_rows(model, lambda _: reducer.Evaluation("PASS"))
+    assert captured and all(item.ordinals is None for item in captured)
+
+
+def test_forced_hash_collisions_preserve_exact_search_decisions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = Model(tuple(("items", key) for key in range(80)))
+    evaluated: list[frozenset[RowId]] = []
+
+    def evaluate(candidate: frozenset[RowId]) -> reducer.Evaluation:
+        evaluated.append(candidate)
+        return reducer.Evaluation("PASS")
+
+    expected = reducer.reduce_rows(model, evaluate)
+    expected_evaluated = evaluated.copy()
+    evaluated.clear()
+    original = reducer._CandidateEncoding.encode
+    seen: set[type] = set()
+
+    class CollidingBytes(bytes):
+        def __hash__(self) -> int:
+            return 7
+
+    class CollidingSet(frozenset[RowId]):
+        def __hash__(self) -> int:
+            return 7
+
+    def encode(self: reducer._CandidateEncoding, candidate: Set[RowId]) -> reducer._CacheKey:
+        key = original(self, candidate)
+        seen.add(type(key))
+        return CollidingBytes(key) if isinstance(key, bytes) else CollidingSet(key)
+
+    monkeypatch.setattr(reducer._CandidateEncoding, "encode", encode)
+    actual = reducer.reduce_rows(model, evaluate)
+    assert seen == {bytes, frozenset}
+    assert actual == expected and evaluated == expected_evaluated
+
+
+def test_interrupted_lazy_initialization_salvages_only_the_completed_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = Model(tuple(("items", key) for key in range(80)))
+    calls: list[frozenset[RowId]] = []
+
+    def interrupted(self: reducer._CandidateEncoding) -> dict[RowId, int]:
+        assert self.ordinals is None
+        raise KeyboardInterrupt
+
+    def evaluate(candidate: frozenset[RowId]) -> reducer.Evaluation:
+        calls.append(candidate)
+        return reducer.Evaluation("PASS")
+
+    monkeypatch.setattr(reducer._CandidateEncoding, "_packed_ordinals", interrupted)
+    result = reducer.reduce_rows(model, evaluate)
+    assert calls == [frozenset()]
+    assert len(result.attempts) == 1 and not result.accepted and result.cache_hits == 0
+    assert result.retained == frozenset(model.rows)
+    assert result.termination_reason == "interrupted_best_confirmed_candidate_preserved"
 
 
 @pytest.mark.parametrize("outcome", ["PASS", "DATABASE_INVALID", "UNRESOLVED"])
@@ -109,7 +286,7 @@ def test_normalized_keys_follow_closure_and_unresolved_remains_uncached(
     encoded: list[frozenset[RowId]] = []
     original = reducer._CandidateEncoding.encode
 
-    def record(self: reducer._CandidateEncoding, candidate: Set[RowId]) -> bytes:
+    def record(self: reducer._CandidateEncoding, candidate: Set[RowId]) -> reducer._CacheKey:
         encoded.append(frozenset(candidate))
         return original(self, candidate)
 
@@ -140,7 +317,7 @@ def test_encoding_interruption_preserves_committed_acceptance(
     encodings = 0
     evaluations: list[frozenset[RowId]] = []
 
-    def interrupted(self: reducer._CandidateEncoding, candidate: Set[RowId]) -> bytes:
+    def interrupted(self: reducer._CandidateEncoding, candidate: Set[RowId]) -> reducer._CacheKey:
         nonlocal encodings
         encodings += 1
         if encodings == 3 and boundary == "before":
@@ -168,7 +345,12 @@ def test_encoding_interruption_preserves_committed_acceptance(
 def test_ordinal_construction_interruption_preserves_original_selection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def interrupted(self: reducer._CandidateEncoding, rows: Iterable[RowId]) -> None:
+    def interrupted(
+        self: reducer._CandidateEncoding,
+        rows: Iterable[RowId],
+        *,
+        universe: frozenset[RowId] | None = None,
+    ) -> None:
         raise KeyboardInterrupt
 
     def evaluate(candidate: frozenset[RowId]) -> reducer.Evaluation:
@@ -190,7 +372,7 @@ def test_cache_insertion_interruption_does_not_promote_completed_evaluation(
     injected = False
     evaluations: list[frozenset[RowId]] = []
 
-    class InterruptingKey(bytes):
+    class InterruptingKey(frozenset[RowId]):
         hashes = 0
 
         def __hash__(self) -> int:
@@ -201,9 +383,9 @@ def test_cache_insertion_interruption_does_not_promote_completed_evaluation(
                 raise KeyboardInterrupt
             return super().__hash__()
 
-    def encode(self: reducer._CandidateEncoding, candidate: Set[RowId]) -> bytes:
+    def encode(self: reducer._CandidateEncoding, candidate: Set[RowId]) -> reducer._CacheKey:
         key = original(self, candidate)
-        return InterruptingKey(key) if candidate and boundary == "before" else key
+        return InterruptingKey(candidate) if candidate and boundary == "before" else key
 
     def evaluate(candidate: frozenset[RowId]) -> reducer.Evaluation:
         evaluations.append(candidate)

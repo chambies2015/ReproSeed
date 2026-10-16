@@ -234,23 +234,36 @@ isolated imports, seeded candidate sequences, bounded memory/timing workloads an
 real existing applications. Include unfavorable measurements and platform limits.
 See [progress/events](progress-events.md), [performance](performance.md) and
 [M2e completion](m2e-completion.md). This explicitly authorized engineering work
-does not broaden SQLite support or satisfy independent human feedback. M2e remains
-unstaged/uncommitted for Dan; new hosted acceptance awaits his review/commit/push.
-Public-alpha readiness remains **CONDITIONAL GO** pending that hosted gate,
-independent developer feedback and his distribution decision.
+does not broaden SQLite support or establish independent human feedback. M2e was
+accepted at commit `0b776c8f5002c846940e438207d582af2259bda6` in hosted run
+`38901295778`. Its historical completion report remains unchanged.
 
-## Next — limited-alpha decision and outside-user feedback
+## M2f — generated correctness, density-aware exact caching and automated readiness
 
-Resolve the readiness conditions, then Dan decides the supported alpha scope and a
-distribution channel. Invite independent developers to attempt the documented workflow
-and record task completion, confusion, dependency gaps and useful reproducer sharing.
-The internal first-user simulation is not that study. Prioritize observed correctness
-or onboarding blockers before speculative SQLite expansion or a broader adapter.
-Any future alpha release identifier and publication need a separate explicit decision.
+Use bounded exact sparse keys and lazy packed membership without changing normalized
+candidate order, outcomes, budgets or confirmation contracts. Extend the existing lab
+with actual pre-M2e/M2e/new source comparisons, threshold/mixed workloads and honest
+fixed-index/lifetime costs. Independently check generated SQLite relationships through
+SQL queries and a reference traversal; retain explicit seeds, bounded profiles, isolated
+differential workers, raw counterexamples and disposable mutation-sensitivity evidence.
+See [M2f completion](m2f-completion.md) for actual runs and limitations.
+
+Dan directs continued implementation and technical acceptance through thorough
+automated testing. Independent human usability is NOT TESTED/advisory and is not a
+development or limited-alpha recommendation prerequisite. Automated checks establish
+only their tested invariants and scope; they are not a human study. Actual hosted CI on
+Dan's reviewed M2f commit, unresolved critical defects and package/replay correctness
+remain technical gates. Leave M2f unstaged/uncommitted. No publication is authorized.
+
+## Next — limited-alpha decision
+
+Resolve technical gates, then Dan separately decides distribution/version/support.
+Human feedback remains useful when available, without blocking engineering work.
+No release, package upload or public distribution follows from a technical recommendation.
 
 ## M3 — PostgreSQL
 
-Consider an adapter only after the limited-alpha decision and outside-user feedback,
+Consider an adapter only after a separate limited-alpha/scope decision,
 with SQLite contracts and replay evidence stable. Revisit snapshot,
 dependency, server permissions and reproducibility semantics for PostgreSQL.
 

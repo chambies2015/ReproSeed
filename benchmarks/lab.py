@@ -21,6 +21,7 @@ from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 BASELINE = "27be3d46c31f752f8944eb6e78d0f743f4edb9cd"
+ACCEPTED = "0b776c8f5002c846940e438207d582af2259bda6"
 
 
 def command(arguments, cwd, *, timeout=1200):
@@ -153,11 +154,11 @@ def prepare_fixture(source, destination, example, minimum_rows):
     }
 
 
-def run_worker(source, directory, kind, extra=()):
+def run_worker(source, directory, kind, extra=(), *, worker=None):
     args = [
         sys.executable,
         "-I",
-        str(Path(__file__).with_name("worker.py")),
+        str(worker or Path(__file__).with_name("worker.py")),
         "--source",
         str(source),
         "--directory",
@@ -219,8 +220,12 @@ def summarize(samples):
             else:
                 times.setdefault(label + "/search_seconds", []).append(entry["seconds"])
         for entry in measurement.get("encoding", []):
-            label = f"{entry['rows']}/{entry['shape']}/{side}/encoding_seconds"
-            times.setdefault(label, []).append(entry["encoding_seconds"])
+            label = f"{entry['rows']}/{entry['shape']}/{side}"
+            if entry["traced"]:
+                memory[label + "/encoding_allocations"] = entry
+            else:
+                for metric in ("encoding_seconds", "initialization_seconds"):
+                    times.setdefault(label + "/" + metric, []).append(entry[metric])
         for entry in measurement.get("model", []):
             for name in (
                 "model_seconds",
@@ -251,6 +256,7 @@ def main():
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--source", type=Path, default=REPOSITORY)
     parser.add_argument("--baseline-ref", default=BASELINE)
+    parser.add_argument("--accepted-ref", default=ACCEPTED)
     parser.add_argument(
         "--mode", choices=("all", "micro", "differential", "real", "smoke"), default="all"
     )
@@ -263,6 +269,8 @@ def main():
         parser.error("repetitions must be 1..5 and candidates 3..64")
     if not 20000 <= args.real_rows <= 50000:
         parser.error("real-rows must be 20000..50000")
+    if not 1 <= len(args.sizes) <= 3 or len(set(args.sizes)) != len(args.sizes):
+        parser.error("choose one to three distinct sizes")
     if any(not 16 <= n <= 100000 or n % 4 for n in args.sizes):
         parser.error("sizes must be multiples of four from 16..100000")
     source = args.source.resolve()
@@ -270,18 +278,21 @@ def main():
     output.mkdir(exist_ok=False)
     baseline = output / "baseline-source"
     baseline_evidence = archive_baseline(source, baseline, args.baseline_ref)
+    accepted = output / "accepted-source"
+    accepted_evidence = archive_baseline(source, accepted, args.accepted_ref)
     current = output / "new-source"
     new_files = snapshot(source, current)
+    worker_snapshot = output / "worker.py"
+    shutil.copyfile(Path(__file__).with_name("worker.py"), worker_snapshot)
     head = command(["git", "rev-parse", "HEAD"], source, timeout=30)
     status = command(["git", "status", "--short"], source, timeout=30)
     evidence = {
         "measurement_version": 1,
         "baseline": baseline_evidence,
+        "accepted": accepted_evidence,
         "new": {"head": head.stdout.strip(), "status": status.stdout, "files": new_files},
         "recipe_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        "worker_sha256": hashlib.sha256(
-            Path(__file__).with_name("worker.py").read_bytes()
-        ).hexdigest(),
+        "worker_sha256": hashlib.sha256(worker_snapshot.read_bytes()).hexdigest(),
         "limits": {
             "sizes": [64] if args.mode == "smoke" else args.sizes,
             "candidate_count": args.candidates,
@@ -296,40 +307,57 @@ def main():
             "Tracemalloc is Python allocations, not RSS/native SQLite/children.",
             "Cache owned sizes exclude pre-existing row identities; "
             "ordinal dict/int overhead included.",
+            "Pre-existing model indexes and shared rows/universe references are reported "
+            "separately; model-plus-cache totals include them once.",
+            "Encoder scratch peaks are traced separately from search and retained keys.",
+            "Sparse-only savings do not imply index retirement after packed candidates.",
             "Run with competing validation workers stopped; contention is operator-reported.",
         ],
     }
 
     def sample(side, name, kind, extra=()):
-        result = run_worker(baseline if side == "baseline" else current, output / name, kind, extra)
+        roots = {"baseline": baseline, "accepted": accepted, "new": current}
+        result = run_worker(roots[side], output / name, kind, extra, worker=worker_snapshot)
         result.update(side=side, name=name)
         evidence["samples"].append(result)
         write_json(output / "comparison.json", evidence)
         print(f"{name}: {result['status']}", flush=True)
         return result
 
+    def compare(group, kind, **labels):
+        comparison_kind = labels.pop("comparison_kind", kind)
+        for side in ("baseline", "accepted"):
+            equal = all(group[name]["status"] == "passed" for name in (side, "new"))
+            if equal:
+                left = group[side]["measurement"][kind]
+                right = group["new"]["measurement"][kind]
+                equal = (
+                    (semantic_real(left) == semantic_real(right))
+                    if kind == "real"
+                    else (left == right)
+                )
+            evidence["semantic_comparisons"].append(
+                {"kind": comparison_kind, "reference": side, **labels, "equal": equal}
+            )
+
     if args.mode in {"all", "micro", "smoke"}:
         sizes = [64] if args.mode == "smoke" else args.sizes
         repetitions = 1 if args.mode == "smoke" else args.repetitions
         extra = ["--sizes", *sizes, "--candidates", args.candidates]
         for repetition in range(repetitions):
-            for side in ("baseline", "new") if repetition % 2 == 0 else ("new", "baseline"):
+            order = ("baseline", "accepted", "new")
+            order = order[repetition % 3 :] + order[: repetition % 3]
+            for side in order if repetition % 2 == 0 else tuple(reversed(order)):
                 sample(side, f"timing-{repetition}-{side}", "micro", [*extra, "--timing-only"])
-        for side in ("new", "baseline"):
+        for side in ("new", "accepted", "baseline"):
             sample(side, f"memory-{side}", "micro", [*extra, "--memory-only"])
     if args.mode in {"all", "differential", "smoke"}:
         for seed in (271828, 314159, 161803):
-            pair = [
-                sample(side, f"differential-{seed}-{side}", "differential", ["--seed", seed])
-                for side in ("baseline", "new")
-            ]
-            equal = (
-                all(item["status"] == "passed" for item in pair)
-                and pair[0]["measurement"]["differential"] == pair[1]["measurement"]["differential"]
-            )
-            evidence["semantic_comparisons"].append(
-                {"kind": "seeded_graph", "seed": seed, "equal": equal}
-            )
+            group = {
+                side: sample(side, f"differential-{seed}-{side}", "differential", ["--seed", seed])
+                for side in ("baseline", "accepted", "new")
+            }
+            compare(group, "differential", comparison_kind="seeded_graph", seed=seed)
     if args.mode in {"all", "real", "smoke"}:
         examples = (
             ("threshold",) if args.mode == "smoke" else ("duplicate_export", "composite_billing")
@@ -340,7 +368,11 @@ def main():
                 current, fixture, example, 0 if args.mode == "smoke" else args.real_rows
             )
             pair = {}
-            order = ("baseline", "new") if ordinal % 2 == 0 else ("new", "baseline")
+            order = (
+                ("baseline", "accepted", "new")
+                if ordinal % 2 == 0
+                else ("new", "accepted", "baseline")
+            )
             for side in order:
                 pair[side] = sample(
                     side,
@@ -348,25 +380,13 @@ def main():
                     "real",
                     ["--fixture", fixture, "--record-identities"],
                 )
-            equal = all(item["status"] == "passed" for item in pair.values()) and semantic_real(
-                pair["baseline"]["measurement"]["real"]
-            ) == semantic_real(pair["new"]["measurement"]["real"])
-            evidence["semantic_comparisons"].append(
-                {"kind": "real", "example": example, "equal": equal}
-            )
+            compare(pair, "real", example=example)
             ordinary = {}
             for side in reversed(order):
                 ordinary[side] = sample(
                     side, f"ordinary-{example}-{side}", "real", ["--fixture", fixture]
                 )
-            ordinary_equal = all(
-                item["status"] == "passed" for item in ordinary.values()
-            ) and semantic_real(ordinary["baseline"]["measurement"]["real"]) == semantic_real(
-                ordinary["new"]["measurement"]["real"]
-            )
-            evidence["semantic_comparisons"].append(
-                {"kind": "ordinary_real", "example": example, "equal": ordinary_equal}
-            )
+            compare(ordinary, "real", comparison_kind="ordinary_real", example=example)
             enabled = sample(
                 "new", f"real-{example}-progress", "real", ["--fixture", fixture, "--observe"]
             )

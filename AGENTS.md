@@ -1,6 +1,6 @@
 # Engineering guidance
 
-ReproSeed M2e is a local Python 3.12+ CLI with a standard-library-only runtime.
+ReproSeed M2f is a local Python 3.12+ CLI with a standard-library-only runtime.
 Architecture and scope are described in docs/architecture.md and docs/roadmap.md.
 
 ## Module boundaries
@@ -40,8 +40,9 @@ Use synthetic fixtures and real SQLite/subprocess integration tests. Preserve us
 - Reserve final verification capacity. Do not publish a verified bundle on failed confirmation.
 - Publish retained rows, acceptance evidence and attempt history as one coherent search state.
 - Derive cache/invalid/unresolved summaries from committed attempt records.
-- Cache exact normalized membership bytes only within one immutable row universe;
-  deterministic ordinals preserve typed declared identities and table separation.
+- Cache exact normalized membership only within one immutable row universe: bounded
+  sparse identity sets or packed bytes with lazy deterministic ordinals preserve typed
+  declared identities and table separation. The representation rule is history-independent.
 - Emit accepted/retained telemetry after checkpoint publication. Observer I/O
   failures disable only their sink; interrupts and implementation bugs propagate.
 - Search cancellation preserves a committed confirmed selection; it never promotes partial
@@ -104,6 +105,9 @@ uv run pytest --basetemp=.validation/pytest
 uv run pytest tests/test_without_rowid.py tests/test_composite_keys.py tests/test_text_keys.py tests/test_diagnose_cli.py tests/test_diagnostics.py tests/test_realistic_acceptance.py --basetemp=.validation/pytest-focused
 uv run pytest tests/test_compact_cache.py tests/test_observation.py tests/test_observation_workflow.py tests/test_benchmarks.py tests/test_config_artifacts.py::test_replay_rejects_invalid_bundle_before_launch --basetemp=.validation/m2e-focused-fresh
 uv run --locked python benchmarks/lab.py --directory .validation/m2e-performance-fresh --mode all
+uv run --locked python benchmarks/campaign.py --directory .validation/m2f-generated-smoke-fresh --profile smoke --seed 104729
+uv run --locked python benchmarks/campaign.py --directory .validation/m2f-generated-extended-fresh --profile extended --seed 104729
+uv run --locked python benchmarks/mutations.py --directory .validation/m2f-mutations-fresh
 uv run --locked python tests/milestone_smoke.py --directory .validation/m2c-measurements-fresh
 uv run --locked python tests/milestone_smoke.py --directory .validation/m2c-without-rowid-measurements-fresh --examples composite_billing --without-rowid-billing-fixture
 uv run --locked python tests/compatibility_smoke.py --directory .validation/pre-m1b-v1-fresh
@@ -139,18 +143,22 @@ run 38476866662. Accepted M2a.1 is commit d60c79c07ae12666af9572ced69edc3b9523ce
 hosted run 38572680512. Accepted M2b is commit d70edac43c22efe3df643b821af1c51ec756a945 and hosted
 run 38592071692. Accepted M2c is commit dd3db90eee65ed10e158cdcc9ef16b8a677e9852 and
 hosted run 38599450878. All four passed Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python
-3.12. Preserve historical completion reports. M2e changes stay unstaged and uncommitted
+3.12. Preserve historical completion reports. M2f changes stay unstaged and uncommitted
 for Dan; hosted validation requires his subsequent commit and push. External-consumer
 validation uses a fresh standard venv/pip installation outside the checkout, with no network,
 editable imports or PYTHONPATH/PYTHONHOME leakage. Keep tutorial files synchronized with
-docs/getting-started.md. Readiness review does not authorize publication; independent outside-user
-feedback follows the limited-alpha decision. Do not implement PostgreSQL, LLM
+docs/getting-started.md. Readiness review does not authorize publication. Independent human
+usability feedback is NOT TESTED/advisory, not a development or technical-acceptance gate.
+Do not implement PostgreSQL, LLM
 integration or web UI, or publish a release/package, in this milestone.
 
 Accepted M2d.1 is commit 27be3d46c31f752f8944eb6e78d0f743f4edb9cd and hosted
 run 38623620343. Its hosted Windows ACL-denial case was capability-skipped,
 distinct from local actual-denial and deterministic staging-denial evidence.
-M2e authorizes observation, exact lower-memory caching and a bounded performance lab;
-it does not authorize publication or replace independent human feedback. Keep all
-M2e changes unstaged/uncommitted. See benchmarks/README.md for isolated baseline
-comparisons and docs/m2e-completion.md for actual validation and limits.
+Accepted M2e is commit 0b776c8f5002c846940e438207d582af2259bda6 and hosted run
+38901295778. M2f authorizes bounded generated correctness, mutation sensitivity and
+density-aware exact caching. It does not authorize publication. Keep all M2f changes
+unstaged/uncommitted. See benchmarks/README.md for isolated comparisons and campaign
+recipes and docs/m2f-completion.md for actual validation and limits. Freeze and hash
+one coherent source snapshot before final validation; hosted acceptance requires Dan's
+reviewed commit/push and the new commit's actual CI results.

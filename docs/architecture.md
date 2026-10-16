@@ -1,4 +1,4 @@
-# M2e architecture
+# M2f architecture
 
 The contract is: smaller fixture, same specified failure, independently replayable evidence.
 "Same" is the configured exit/marker contract. ReproSeed does not infer semantic equivalence
@@ -12,10 +12,25 @@ rows. Sink I/O/serialization failures disable only the affected sink; interrupti
 retain the search salvage/finalization boundary. Version-1 reports and confirmation
 counts stay unchanged.
 
-Search keys are fixed-width packed membership bytes after dependency closure, using
-a deterministic ordinal map private to that invocation. Exact byte equality resolves
-hash collisions. Empty/full and leading/trailing-zero membership are canonical within
-that universe. The model owns immutable membership and per-table row indexes to avoid
+Search keys are exact retained membership after dependency closure. Up to 32 retained
+rows use a bounded immutable frozenset of declared identities. Larger selections use
+fixed-width packed bytes and a deterministic ordinal map built lazily for that invocation.
+The fixed cardinality rule never depends on earlier cache entries or index initialization.
+Exact equality resolves hash collisions in either form; the two key types are disjoint.
+Equal sets choose the same form and compare equal. Unequal sparse sets differ by exact
+identity, and unequal packed sets differ in at least one membership bit. Thus empty/full
+selections and the 32/33 boundary are canonical within the immutable universe.
+
+The encoder borrows the model's existing immutable membership and row tuple. Protocol
+callers without that index use tuple membership for sparse keys. No extra full-universe
+membership set is retained. Non-tuple iterables supplied directly to the internal
+encoder are materialized into an owned tuple; production passes its existing tuple.
+Foreign identities and unsupported Python identities such
+as bool/float aliases of integer keys are rejected. The ordinal map is constructed
+privately and published in one assignment; interruption cannot expose a partial map.
+Once needed, it remains live even if later candidates become sparse. This is a sparse-only
+storage improvement, not index retirement or a whole-process bound. The model owns
+immutable membership and per-table row indexes to avoid
 repeated universe construction/scans; per-table deletion order and private-copy
 validation remain unchanged. See [performance](performance.md) for measured tradeoffs
 and [events](progress-events.md) for the separate version-1 diagnostic contract.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ from reproseed.cli import main
 from reproseed.config import Config, load_config
 from reproseed.observation import Observation
 from reproseed.oracle import OracleInterrupted
+from reproseed.sqlite_adapter import RowId
 
 
 def _case(root: Path, **kwargs: Any) -> Config:
@@ -178,6 +180,50 @@ def test_new_search_boundaries_with_observation_keep_confirmed_fixture(
     assert not report["accepted_reductions"]
     assert report["final_counts"] == {"items": 2}
     _verified_lifecycle(config, bundle, report, source, invocations=report["oracle_invocations"])
+
+
+def test_interrupted_private_lazy_map_publishes_a_strict_replayable_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _case(tmp_path / "source", rows=80)
+    source = _files(config.path.parent)
+    original = reducer._CandidateEncoding._packed_ordinals
+    captured: list[reducer._CandidateEncoding] = []
+    interrupted = False
+
+    def initialize(self: reducer._CandidateEncoding) -> dict[RowId, int]:
+        captured.append(self)
+        assert self.ordinals is None
+        previous = sys.gettrace()
+
+        def trace(frame: Any, event: str, argument: object) -> Any:
+            nonlocal interrupted
+            if (
+                event == "line"
+                and frame.f_code is original.__code__
+                and frame.f_locals.get("ordinal") == 9
+                and not interrupted
+            ):
+                interrupted = True
+                raise KeyboardInterrupt
+            return trace
+
+        try:
+            sys.settrace(trace)
+            return original(self)
+        finally:
+            sys.settrace(previous)
+
+    monkeypatch.setattr(reducer._CandidateEncoding, "_packed_ordinals", initialize)
+    bundle = tmp_path / "bundle"
+    report = create_bundle(config, bundle, Collector())
+    assert interrupted and len(captured) == 1 and captured[0].ordinals is None
+    assert report["final_counts"] == {"items": 80}
+    assert report["termination_reason"] == "interrupted_best_confirmed_candidate_preserved"
+    assert not report["accepted_reductions"] and len(report["attempts"]) == 1
+    assert report["attempts"][0]["outcome"] == "PASS"
+    assert report["oracle_invocations"] == 7 and report["cache_hits"] == 0
+    _verified_lifecycle(config, bundle, report, source, invocations=7)
 
 
 @pytest.mark.parametrize("phase", ["baseline", "compaction", "final_verification", "publication"])

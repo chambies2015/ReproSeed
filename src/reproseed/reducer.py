@@ -57,23 +57,65 @@ class _Checkpoint:
     cache_hits: int = 0
 
 
+_CacheKey = bytes | frozenset[RowId]
+_SPARSE_LIMIT = 32
+
+
+def _supported_identity(row: RowId) -> bool:
+    # bool/float compare equal to integers in Python, but are not SQLite identities.
+    if type(row) is not tuple or len(row) != 2 or type(row[0]) is not str:
+        return False
+    key = row[1]
+    if type(key) in (int, str):
+        return True
+    return (
+        type(key) is tuple
+        and len(key) == 2
+        and all(type(component) in (int, str) for component in key)
+    )
+
+
 class _CandidateEncoding:
-    """Exact packed membership within one immutable, deterministically ordered universe."""
+    """Bounded exact sparse keys and lazy packed membership in one immutable universe."""
 
-    def __init__(self, rows: Iterable[RowId]) -> None:
-        # Keep the existing RowId objects, rather than copying or stringifying keys.
-        # Duplicates in a protocol caller's rows still describe one row identity.
-        self.ordinals = dict.fromkeys(rows, 0)
-        for ordinal, row in enumerate(sorted(self.ordinals, key=row_sort_key)):
-            self.ordinals[row] = ordinal
-        self.byte_count = (len(self.ordinals) + 7) // 8
+    def __init__(self, rows: Iterable[RowId], *, universe: frozenset[RowId] | None = None) -> None:
+        # Production borrows both objects from the live immutable model. Protocol
+        # callers without its membership index use tuple membership on the small
+        # sparse path; no additional O(N) membership structure is retained.
+        self.rows = rows if isinstance(rows, tuple) else tuple(rows)
+        if any(not _supported_identity(row) for row in self.rows):
+            raise ValueError("Unsupported row identity in candidate universe")
+        self.universe = universe
+        self.ordinals: dict[RowId, int] | None = None
 
-    def encode(self, retained: Set[RowId]) -> bytes:
+    def _packed_ordinals(self) -> dict[RowId, int]:
+        if self.ordinals is None:
+            # Build privately. An interruption leaves the previous coherent state;
+            # neither encoding nor later evaluation can observe a partial map.
+            ordinals = dict.fromkeys(self.rows, 0)
+            for ordinal, row in enumerate(sorted(ordinals, key=row_sort_key)):
+                ordinals[row] = ordinal
+            self.ordinals = ordinals
+        return self.ordinals
+
+    def encode(self, retained: Set[RowId]) -> _CacheKey:
+        if len(retained) <= _SPARSE_LIMIT:
+            universe = self.rows if self.universe is None else self.universe
+            for row in retained:
+                if not _supported_identity(row):
+                    raise ValueError("Unsupported row identity in candidate")
+                if row not in universe:
+                    raise KeyError(row)
+            return frozenset(retained)
+        ordinals = self._packed_ordinals()
         # Fixed width preserves leading/trailing zero bits. Each identity owns one
-        # bit, so byte equality is set equality within this invocation's universe.
-        membership = bytearray(self.byte_count)
+        # bit; bytes and sparse frozensets are disjoint key types. Cardinality alone
+        # selects the representation, independent of insertion/initialization order.
+        membership = bytearray((len(ordinals) + 7) // 8)
         for row in retained:
-            ordinal = self.ordinals[row]
+            if not _supported_identity(row):
+                raise ValueError("Unsupported row identity in candidate")
+            ordinal = ordinals[row]
             membership[ordinal // 8] |= 1 << (ordinal % 8)
         return bytes(membership)
 
@@ -120,11 +162,11 @@ def reduce_rows(
     checkpoint = _Checkpoint(frozenset(model.rows))
     attempts: list[dict[str, object]] = []
     accepted: list[dict[str, object]] = []
-    cache: dict[bytes, Evaluation] = {}
+    cache: dict[_CacheKey, Evaluation] = {}
     groups = 1
     reason = "single_row_closures_exhausted"
     try:
-        encoding = _CandidateEncoding(model.rows)
+        encoding = _CandidateEncoding(model.rows, universe=getattr(model, "row_universe", None))
         while checkpoint.retained:
             retained = checkpoint.retained
             ordered = sorted(retained, key=row_sort_key)
