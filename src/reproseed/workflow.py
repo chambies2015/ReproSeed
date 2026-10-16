@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from reproseed.config import Config
+from reproseed.observation import NO_OBSERVER, Observation, Observer, Phase, sanitize_reason
 from reproseed.oracle import OracleInterrupted, OracleInvocation, OracleResult, Outcome, run_oracle
 from reproseed.reducer import AbortReduction, BudgetExhausted, Evaluation, reduce_rows
 from reproseed.sqlite_adapter import DatabaseError, DatabaseModel, RowId, compact, snapshot
@@ -34,6 +35,8 @@ class _Accounting:
 @dataclass
 class InvocationCounter:
     config: Config
+    observer: Observer = NO_OBSERVER
+    phase: Phase = "search"
     _accounting: _Accounting = field(default_factory=_Accounting, init=False)
 
     @property
@@ -82,7 +85,6 @@ class InvocationCounter:
             result = run_oracle(self.config.oracle, database, self.config.assets, invocation)
             invocation.executed = result.executed
             self._record(invocation, interrupted=False)
-            return result
         except KeyboardInterrupt as exc:
             # This recovery is attempted once. A further interrupt propagates;
             # it cannot turn an incomplete finalization into a verified bundle.
@@ -90,26 +92,84 @@ class InvocationCounter:
                 if isinstance(exc, OracleInterrupted):
                     invocation.executed = exc.executed
                 self._record(invocation, interrupted=True)
+                self.observer.emit(
+                    Observation(
+                        "invocation",
+                        self.phase,
+                        outcome="UNRESOLVED",
+                        reason="interrupted",
+                        executed=invocation.executed,
+                        known_executions=self.count,
+                        unknown_launches=self.unknown_launches,
+                        charged_invocations=self.charged,
+                    )
+                )
             except KeyboardInterrupt:
                 raise AbortReduction from None
             if isinstance(exc, OracleInterrupted) and exc.abort:
                 raise AbortReduction from exc
             raise
+        # Notification follows coherent accounting, outside interruption recovery.
+        self.observer.emit(
+            Observation(
+                "invocation",
+                self.phase,
+                outcome=result.outcome.value,
+                executed=result.executed,
+                known_executions=self.count,
+                unknown_launches=self.unknown_launches,
+                charged_invocations=self.charged,
+            )
+        )
+        return result
 
 
-def build_verified_fixture(config: Config, destination: Path) -> dict[str, object]:
-    counter = InvocationCounter(config)
+def build_verified_fixture(
+    config: Config, destination: Path, observer: Observer = NO_OBSERVER
+) -> dict[str, object]:
+    counter = InvocationCounter(config, observer)
     with tempfile.TemporaryDirectory(prefix="reproseed-search-") as temporary:
         working = Path(temporary)
         pristine = working / "pristine.sqlite3"
+        observer.emit(Observation("started", "acquisition"))
         snapshot(config.source, pristine)
+        observer.emit(Observation("completed", "acquisition"))
+        observer.emit(Observation("started", "model"))
         model = DatabaseModel.from_database(pristine)
-        baseline = [counter.invoke(pristine).as_dict() for _ in range(3)]
+        observer.emit(
+            Observation(
+                "model_ready",
+                "model",
+                original_rows=len(model.rows),
+                retained_rows=len(model.rows),
+                max_invocations=config.max_invocations,
+            )
+        )
+        counter.phase = "baseline"
+        observer.emit(Observation("started", "baseline", required_confirmations=3))
+        baseline = []
+        for confirmation in range(1, 4):
+            result = counter.invoke(pristine)
+            baseline.append(result.as_dict())
+            observer.emit(
+                Observation(
+                    "confirmation",
+                    "baseline",
+                    confirmation=confirmation,
+                    required_confirmations=3,
+                    outcome=result.outcome.value,
+                    known_executions=counter.count,
+                    charged_invocations=counter.charged,
+                )
+            )
         if any(result["outcome"] != Outcome.TARGET_FAILURE.value for result in baseline):
+            observer.emit(Observation("failed", "baseline", reason="baseline_failed"))
             outcomes = [str(result["outcome"]) + ":" + str(result["reason"]) for result in baseline]
             raise VerificationError(
                 "baseline failed three fresh confirmations: " + ", ".join(outcomes)
             )
+        observer.emit(Observation("completed", "baseline", required_confirmations=3))
+        counter.phase = "search"
 
         def evaluate(retained: frozenset[RowId]) -> Evaluation:
             if counter.charged + 2 > config.max_invocations - 3:
@@ -132,15 +192,52 @@ def build_verified_fixture(config: Config, destination: Path) -> dict[str, objec
                     )
                 return Evaluation("TARGET_FAILURE", tuple(confirmations), "two_fresh_confirmations")
 
-        search = reduce_rows(model, evaluate)
+        observer.emit(Observation("started", "search", retained_rows=len(model.rows)))
+        search = reduce_rows(model, evaluate, observer=observer)
+        observer.emit(
+            Observation(
+                "search_stopped",
+                "search",
+                retained_rows=len(search.retained),
+                attempts=len(search.attempts),
+                accepted_changes=len(search.accepted),
+                cache_hits=search.cache_hits,
+                reason=sanitize_reason(search.termination_reason),
+                known_executions=counter.count,
+                unknown_launches=counter.unknown_launches,
+                charged_invocations=counter.charged,
+            )
+        )
+        observer.emit(Observation("started", "compaction", retained_rows=len(search.retained)))
         best = working / "best.sqlite3"
         model.materialize(pristine, search.retained, best)
         compact(best, destination)
-        final = [counter.invoke(destination).as_dict() for _ in range(3)]
+        observer.emit(Observation("completed", "compaction", retained_rows=len(search.retained)))
+        counter.phase = "final_verification"
+        observer.emit(Observation("started", "final_verification", required_confirmations=3))
+        final = []
+        for confirmation in range(1, 4):
+            result = counter.invoke(destination)
+            final.append(result.as_dict())
+            observer.emit(
+                Observation(
+                    "confirmation",
+                    "final_verification",
+                    confirmation=confirmation,
+                    required_confirmations=3,
+                    outcome=result.outcome.value,
+                    known_executions=counter.count,
+                    charged_invocations=counter.charged,
+                )
+            )
         if any(result["outcome"] != Outcome.TARGET_FAILURE.value for result in final):
+            observer.emit(
+                Observation("failed", "final_verification", reason="final_verification_failed")
+            )
             raise VerificationError(
                 "final artifact failed three fresh confirmations; bundle not published"
             )
+        observer.emit(Observation("completed", "final_verification", required_confirmations=3))
         return {
             "version": 1,
             "verified": True,

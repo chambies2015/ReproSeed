@@ -1,8 +1,24 @@
-# M2c architecture
+# M2e architecture
 
 The contract is: smaller fixture, same specified failure, independently replayable evidence.
 "Same" is the configured exit/marker contract. ReproSeed does not infer semantic equivalence
 between arbitrary crashes. The runtime uses Python 3.12+ standard-library modules only.
+
+Opt-in observation uses a small typed callback with a no-op default. CLI-owned sinks
+write aggregate stderr lines and bounded exclusive JSONL outside bundles. Workflow
+notifications follow invocation accounting; search notifications follow coherent
+checkpoint publication. Pending candidates remain separate from committed retained
+rows. Sink I/O/serialization failures disable only the affected sink; interruptions
+retain the search salvage/finalization boundary. Version-1 reports and confirmation
+counts stay unchanged.
+
+Search keys are fixed-width packed membership bytes after dependency closure, using
+a deterministic ordinal map private to that invocation. Exact byte equality resolves
+hash collisions. Empty/full and leading/trailing-zero membership are canonical within
+that universe. The model owns immutable membership and per-table row indexes to avoid
+repeated universe construction/scans; per-table deletion order and private-copy
+validation remain unchanged. See [performance](performance.md) for measured tradeoffs
+and [events](progress-events.md) for the separate version-1 diagnostic contract.
 
 ## Lifecycle
 

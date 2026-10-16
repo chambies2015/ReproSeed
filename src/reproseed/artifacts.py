@@ -28,6 +28,7 @@ from reproseed.config import (
     relative_name,
     safe_file,
 )
+from reproseed.observation import NO_OBSERVER, Observation, Observer
 from reproseed.oracle import Outcome, run_oracle
 from reproseed.report import ReportError, validate_report
 from reproseed.sqlite_adapter import DatabaseError, DatabaseModel
@@ -112,7 +113,37 @@ def _build_directory(parent: Path) -> Iterator[Path]:
                 raise
 
 
-def create_bundle(config: Config, output: Path) -> dict[str, object]:
+def create_bundle(
+    config: Config, output: Path, observer: Observer = NO_OBSERVER
+) -> dict[str, object]:
+    observer.emit(Observation("started", "run"))
+    try:
+        report = _create_bundle(config, output, observer)
+    except KeyboardInterrupt:
+        observer.emit(Observation("aborted", "run", reason="interrupted"))
+        raise
+    except (ValueError, OSError, sqlite3.Error):
+        observer.emit(Observation("failed", "run", reason="operation_failed"))
+        raise
+    observer.emit(
+        Observation(
+            "completed",
+            "run",
+            original_rows=sum(cast(dict[str, int], report["original_counts"]).values()),
+            retained_rows=sum(cast(dict[str, int], report["final_counts"]).values()),
+            attempts=len(cast(list[object], report["attempts"])),
+            accepted_changes=len(cast(list[object], report["accepted_reductions"])),
+            cache_hits=cast(int, report["cache_hits"]),
+            known_executions=cast(int, report["oracle_invocations"]),
+            charged_invocations=cast(int, report["budget_charged_invocations"]),
+            unknown_launches=cast(int, report["unknown_interrupted_launches"]),
+        )
+    )
+    return report
+
+
+def _create_bundle(config: Config, output: Path, observer: Observer) -> dict[str, object]:
+    observer.emit(Observation("started", "preparation"))
     output = check_output(config, output)
     output.parent.mkdir(parents=True, exist_ok=True)
     with _build_directory(output.parent) as staging:
@@ -123,7 +154,9 @@ def create_bundle(config: Config, output: Path) -> dict[str, object]:
             shutil.copy2(asset.path, destination)
             staged_assets.append(Asset(asset.relative, destination))
         staged = replace(config, assets=tuple(staged_assets))
-        report = build_verified_fixture(staged, staging / "fixture.sqlite3")
+        observer.emit(Observation("completed", "preparation"))
+        report = build_verified_fixture(staged, staging / "fixture.sqlite3", observer=observer)
+        observer.emit(Observation("started", "publication"))
         (staging / "replay.toml").write_text(replay_toml(staged), encoding="utf-8")
         write_json(staging / "report.json", report)
         (staging / "README.md").write_text(
@@ -164,6 +197,7 @@ def create_bundle(config: Config, output: Path) -> dict[str, object]:
             # Only this newly created directory is ours. Never remove a pre-existing bundle.
             shutil.rmtree(output)
             raise
+        observer.emit(Observation("published", "publication"))
     return report
 
 

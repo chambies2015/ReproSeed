@@ -57,7 +57,7 @@ def inspect_distributions(wheel: Path, sdist: Path) -> dict[str, object]:
         assert all(member.isfile() for member in members.values()), (
             "sdist contains nonregular files"
         )
-        for directory in ("src", "tests", "examples", "docs", ".github"):
+        for directory in ("src", "tests", "examples", "docs", "benchmarks", ".github"):
             for path in (REPOSITORY / directory).rglob("*"):
                 if not path.is_file() or "__pycache__" in path.parts:
                     continue
@@ -88,7 +88,18 @@ def inspect_distributions(wheel: Path, sdist: Path) -> dict[str, object]:
     for name in wheel_names + sdist_names:
         assert not forbidden.intersection(name.split("/")), name
         assert not name.endswith(
-            (".sqlite3", ".sqlite", ".db", ".pyc", "-wal", "-shm", "-journal", ".log")
+            (
+                ".sqlite3",
+                ".sqlite",
+                ".db",
+                ".pyc",
+                "-wal",
+                "-shm",
+                "-journal",
+                ".log",
+                ".jsonl",
+                ".prof",
+            )
         ), name
     return {
         "checks_passed": True,

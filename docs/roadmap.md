@@ -214,10 +214,30 @@ Keep real ACL integration separate from deterministic boundary coverage, along
 with collision and interruption regressions, finite stability results and the
 complete product/installed-wheel/compatibility checks. See
 [M2d.1 completion evidence](m2d1-completion.md) for the actual repair and validation.
-Changes remain unstaged and uncommitted for Dan; acceptance requires his subsequent
-review, commit and push, followed by success in all three unchanged hosted jobs.
-Public-alpha readiness remains **CONDITIONAL GO** pending successful hosted M2d.1
-CI, independent developer feedback and Dan's explicit distribution decision.
+M2d.1 was accepted at commit `27be3d46c31f752f8944eb6e78d0f743f4edb9cd` in
+[hosted run 38623620343](https://github.com/chambies2015/ReproSeed/actions/runs/38623620343).
+The hosted Windows ACL-denial case was capability-skipped; that is separate from
+the recorded local actual-denial and deterministic staging-denial evidence.
+The historical completion report keeps its original observations.
+
+## M2e — observable reductions and bounded performance lab
+
+Add opt-in aggregate stderr progress and a privacy-safe, exclusively created bounded
+JSONL diagnostic file. Preserve default stdout, execution acknowledgement, search
+ordering, cancellation checkpoints and all version-1 bundle contracts. Replace
+retained-frozenset cache keys with exact membership bytes within a deterministic
+per-run universe, and index immutable membership/per-table rows to avoid repeated
+adapter work. Keep all integrity/FK and fresh baseline/final confirmations.
+
+Compare an immutable archive of accepted M2d.1 against the working source with
+isolated imports, seeded candidate sequences, bounded memory/timing workloads and
+real existing applications. Include unfavorable measurements and platform limits.
+See [progress/events](progress-events.md), [performance](performance.md) and
+[M2e completion](m2e-completion.md). This explicitly authorized engineering work
+does not broaden SQLite support or satisfy independent human feedback. M2e remains
+unstaged/uncommitted for Dan; new hosted acceptance awaits his review/commit/push.
+Public-alpha readiness remains **CONDITIONAL GO** pending that hosted gate,
+independent developer feedback and his distribution decision.
 
 ## Next — limited-alpha decision and outside-user feedback
 

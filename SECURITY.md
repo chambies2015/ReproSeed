@@ -96,6 +96,24 @@ every asynchronous exception, forced termination, power loss or hostile process 
 
 ## Data and bundle sharing
 
+Reduction's optional `--progress` and `--events` expose allowlisted aggregate
+counts, lifecycle/outcome labels and fixed reason codes. They omit keys, row data,
+table names, paths, command arguments, markers, environment and process output.
+The JSONL file is exclusively created before oracle execution, outside the bundle;
+it is not included automatically. It is bounded to 16 MiB and reserves a truncation
+record. Sinks retain no complete in-memory history. Partial writes permanently
+disable that sink; other sink failures similarly preserve accounting and search
+state. Aborts can leave an owned partial log. Logs are unauthenticated diagnostics,
+not a complete execution ledger, proof of reproduction or a resume point.
+Synchronous writes can still stall at the OS level; path checks do not promise
+hostile-filesystem race immunity. See [progress/events](docs/progress-events.md).
+
+Candidate caches use exact fixed-width membership bytes with deterministic ordinals
+scoped to one model. Hash-table lookup checks complete byte equality; no fingerprint
+substitutes for identity. This reduces dense cache ownership but does not impose a
+process memory limit: models, selections, attempt evidence, SQLite and subprocesses
+consume additional memory.
+
 Reduction is not anonymization or sanitization. Retained values, schema, included code,
 markers and diagnostic reasons can disclose sensitive information. Private search snapshots
 and candidates contain source data. They are temporary, not securely erased. Final VACUUM

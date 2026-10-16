@@ -44,6 +44,14 @@ checks hashes, fixture validity and recorded evidence; a new replay establishes 
 See [diagnostic output](docs/diagnostics.md), [contributing and validation](CONTRIBUTING.md)
 and [the roadmap](docs/roadmap.md).
 
+For a longer reduction, add `--progress` for aggregate status lines on stderr,
+or `--events run.jsonl` for a new, separate diagnostic file. Both are opt-in;
+stdout keeps the existing JSON summary. Event paths resolve from your working
+directory, their parent must exist, and existing files are never replaced. Events
+omit rows, keys, table names, paths and oracle output. They can be incomplete and
+are not verification evidence or a resume file. See [progress/events](docs/progress-events.md)
+and the measured [performance lab](docs/performance.md).
+
 ## Example applications
 
 Six independent synthetic applications exercise actual data-dependent behavior:

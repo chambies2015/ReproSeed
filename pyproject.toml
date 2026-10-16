@@ -46,7 +46,7 @@ packages = ["src/reproseed"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "/src", "/tests", "/examples", "/docs", "/.github", "/README.md", "/AGENTS.md",
+    "/src", "/tests", "/examples", "/docs", "/benchmarks", "/.github", "/README.md", "/AGENTS.md",
     "/CONTRIBUTING.md", "/SECURITY.md", "/LICENSE", "/pyproject.toml", "/uv.lock", "/.gitignore",
 ]
 exclude = ["**/*.sqlite3", "**/*.db", "**/*-wal", "**/*-shm", "**/*-journal", "**/__pycache__"]

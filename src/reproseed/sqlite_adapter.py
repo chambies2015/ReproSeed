@@ -6,10 +6,11 @@ import math
 import sqlite3
 import time
 from collections import defaultdict
-from collections.abc import Iterable, Set
+from collections.abc import Iterable, Mapping, Set
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
 from typing import Literal, cast
 
 ScalarKey = int | str
@@ -165,6 +166,20 @@ class DatabaseModel:
     rows: tuple[RowId, ...]
     _tables: tuple[_Table, ...]
     _dependents: dict[RowId, frozenset[RowId]]
+    _row_universe: frozenset[RowId] = field(init=False, repr=False, compare=False)
+    _rows_by_table: Mapping[str, tuple[RowId, ...]] = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        # The model is per snapshot, never keyed by a reusable filesystem path.
+        object.__setattr__(self, "_row_universe", frozenset(self.rows))
+        grouped: dict[str, list[RowId]] = {table.name: [] for table in self._tables}
+        for row in self.rows:
+            grouped.setdefault(row[0], []).append(row)
+        object.__setattr__(
+            self,
+            "_rows_by_table",
+            MappingProxyType({name: tuple(rows) for name, rows in grouped.items()}),
+        )
 
     @classmethod
     def from_database(cls, path: Path) -> DatabaseModel:
@@ -204,7 +219,7 @@ class DatabaseModel:
         return counts
 
     def _check_rows(self, selected: Set[RowId]) -> None:
-        if not selected <= set(self.rows):
+        if not selected <= self._row_universe:
             raise DatabaseError("Row identities do not belong to this pristine database model")
 
     def deletion_closure(self, seeds: Iterable[RowId], retained: Set[RowId]) -> frozenset[RowId]:
@@ -237,8 +252,8 @@ class DatabaseModel:
                         )
                         deleted = (
                             key if isinstance(key, tuple) else (key,)
-                            for name, key in self.rows
-                            if name == table.name and (name, key) not in retained
+                            for name, key in self._rows_by_table[table.name]
+                            if (name, key) not in retained
                         )
                         connection.executemany(sql, deleted)
                 connection.execute("PRAGMA foreign_keys = ON")

@@ -19,7 +19,11 @@ from reproseed.workflow import VerificationError
 
 
 def target(
-    tmp_path: Path, body: str = "print('TARGET'); raise SystemExit(42)", budget: int = 40
+    tmp_path: Path,
+    body: str = "print('TARGET'); raise SystemExit(42)",
+    budget: int = 40,
+    *,
+    timeout_seconds: float = 1.0,
 ) -> Path:
     with closing(sqlite3.connect(tmp_path / "source.sqlite3")) as database:
         database.executescript(
@@ -31,7 +35,7 @@ def target(
     config.write_text(
         'version=1\nsource="source.sqlite3"\ninclude=["oracle.py"]\n'
         '[oracle]\nargv=["{python}","oracle.py","{db}"]\nexpected_exit=42\n'
-        'marker="TARGET"\nstream="stdout"\ntimeout_seconds=1.0\noutput_limit_bytes=4096\n'
+        f'marker="TARGET"\nstream="stdout"\ntimeout_seconds={timeout_seconds}\noutput_limit_bytes=4096\n'
         f"[reduction]\nmax_invocations={budget}\n",
         encoding="utf-8",
     )
@@ -211,7 +215,9 @@ def test_output_existing_source_and_asset_conflicts(tmp_path: Path) -> None:
     "change", ["tamper", "version", "missing", "escape", "malformed", "report"]
 )
 def test_replay_rejects_invalid_bundle_before_launch(tmp_path: Path, change: str) -> None:
-    config = target(tmp_path)
+    # Establish a real valid bundle before testing malformed payload rejection;
+    # this setup is not a one-second process-startup/deadline calibration.
+    config = target(tmp_path, timeout_seconds=5.0)
     bundle = tmp_path / "bundle"
     create_bundle(load_config(config), bundle)
     manifest_path = bundle / "manifest.json"

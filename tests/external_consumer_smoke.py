@@ -288,12 +288,42 @@ def exercise_consumer(
             require(diagnosis["baseline_results"] == [], "Static diagnosis executed an oracle")
         diagnoses["baseline" if execute else "static"] = diagnosis
     bundle = outside / "new bundle café"
+    events = outside / "reduction events café.jsonl"
     reduction = commands.document(
-        [str(cli), "reduce", "--config", str(config), "--out", str(bundle), "--allow-exec"],
+        [
+            str(cli),
+            "reduce",
+            "--config",
+            str(config),
+            "--out",
+            str(bundle),
+            "--allow-exec",
+            "--progress",
+            "--events",
+            str(events),
+        ],
         outside,
         timeout=120,
     )
     require(reduction["verified"] is True, "Reduction did not publish a verified bundle")
+    require(
+        "ReproSeed" in str(commands.records[-1]["stderr"])
+        or "reproseed" in str(commands.records[-1]["stderr"]),
+        "Opt-in progress was not written to stderr",
+    )
+    event_records = [json.loads(line) for line in events.read_text(encoding="utf-8").splitlines()]
+    require(
+        bool(event_records)
+        and all(record["event_version"] == 1 for record in event_records)
+        and [record["sequence"] for record in event_records]
+        == list(range(1, len(event_records) + 1))
+        and event_records[-1]["event"] == "completed"
+        and event_records[-1]["phase"] == "run"
+        and event_records[-1]["known_executions"] == reduction["oracle_invocations"],
+        "Installed progress event stream did not complete with consistent accounting",
+    )
+    require(not (bundle / events.name).exists(), "External event file was included in bundle")
+    evidence["progress_events"] = event_records
     require(hashes(project) == source_before, "Diagnosis or reduction changed original input files")
     bundle_before = hashes(bundle)
     report = commands.document([str(cli), "inspect", str(bundle)], outside)

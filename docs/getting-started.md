@@ -284,6 +284,15 @@ from becoming a smaller but irrelevant reproducer.
 
 ## Generate, diagnose, reduce and inspect
 
+Long reductions can opt into `--progress` (aggregate lines on stderr) and
+`--events run.jsonl` (a new file relative to your current working directory).
+Append `--progress --events run.jsonl` to the reduction command below to try both.
+Keep the event file outside the bundle and choose a new name for each run; its
+parent must already exist. Neither option grants execution permission. Default
+output and the tutorial assets remain the same. These optional diagnostics omit
+fixture values and keys and can be incomplete; they are not replay artifacts or
+a verification ledger. See [the event contract](progress-events.md).
+
 Run these commands in `project`, using the variables from the installation section.
 All should exit 0. Static diagnosis confirms structure, assets, integrity and foreign
 keys; it executes no oracle and makes no reproduction claim. The acknowledged diagnosis

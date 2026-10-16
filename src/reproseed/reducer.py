@@ -4,8 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Set
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, cast
 
+from reproseed.observation import (
+    NO_OBSERVER,
+    Observation,
+    ObservationOutcome,
+    Observer,
+    sanitize_reason,
+)
 from reproseed.sqlite_adapter import RowId, row_sort_key
 
 
@@ -47,6 +54,28 @@ class _Checkpoint:
     retained: frozenset[RowId]
     attempt_count: int = 0
     accepted_count: int = 0
+    cache_hits: int = 0
+
+
+class _CandidateEncoding:
+    """Exact packed membership within one immutable, deterministically ordered universe."""
+
+    def __init__(self, rows: Iterable[RowId]) -> None:
+        # Keep the existing RowId objects, rather than copying or stringifying keys.
+        # Duplicates in a protocol caller's rows still describe one row identity.
+        self.ordinals = dict.fromkeys(rows, 0)
+        for ordinal, row in enumerate(sorted(self.ordinals, key=row_sort_key)):
+            self.ordinals[row] = ordinal
+        self.byte_count = (len(self.ordinals) + 7) // 8
+
+    def encode(self, retained: Set[RowId]) -> bytes:
+        # Fixed width preserves leading/trailing zero bits. Each identity owns one
+        # bit, so byte equality is set equality within this invocation's universe.
+        membership = bytearray(self.byte_count)
+        for row in retained:
+            ordinal = self.ordinals[row]
+            membership[ordinal // 8] |= 1 << (ordinal % 8)
+        return bytes(membership)
 
 
 def _commit_progress(
@@ -75,20 +104,27 @@ def _commit_progress(
         accepted.append(
             {"attempt": number, "before": len(checkpoint.retained), "after": len(candidate)}
         )
-        return _Checkpoint(candidate, number, checkpoint.accepted_count + 1)
-    return _Checkpoint(checkpoint.retained, number, checkpoint.accepted_count)
+        return _Checkpoint(
+            candidate, number, checkpoint.accepted_count + 1, checkpoint.cache_hits + int(cached)
+        )
+    return _Checkpoint(
+        checkpoint.retained, number, checkpoint.accepted_count, checkpoint.cache_hits + int(cached)
+    )
 
 
 def reduce_rows(
-    model: ReductionModel, evaluate: Callable[[frozenset[RowId]], Evaluation]
+    model: ReductionModel,
+    evaluate: Callable[[frozenset[RowId]], Evaluation],
+    observer: Observer = NO_OBSERVER,
 ) -> SearchResult:
     checkpoint = _Checkpoint(frozenset(model.rows))
     attempts: list[dict[str, object]] = []
     accepted: list[dict[str, object]] = []
-    cache: dict[frozenset[RowId], Evaluation] = {}
+    cache: dict[bytes, Evaluation] = {}
     groups = 1
     reason = "single_row_closures_exhausted"
     try:
+        encoding = _CandidateEncoding(model.rows)
         while checkpoint.retained:
             retained = checkpoint.retained
             ordered = sorted(retained, key=row_sort_key)
@@ -99,9 +135,22 @@ def reduce_rows(
                 candidate = retained - closure
                 if not closure or len(candidate) >= len(retained):
                     continue
-                cached = candidate in cache
+                observer.emit(
+                    Observation(
+                        "candidate",
+                        "search",
+                        candidate_rows=len(candidate),
+                        retained_rows=len(checkpoint.retained),
+                        attempts=checkpoint.attempt_count,
+                        accepted_changes=checkpoint.accepted_count,
+                        cache_hits=checkpoint.cache_hits,
+                    )
+                )
+                # Closure-normalized membership remains the cache identity.
+                key = encoding.encode(candidate)
+                cached = key in cache
                 if cached:
-                    result = cache[candidate]
+                    result = cache[key]
                 else:
                     try:
                         result = evaluate(candidate)
@@ -120,9 +169,26 @@ def reduce_rows(
                         raise
                     # Unresolved trials are never evidence of a verified failure, nor a stable pass.
                     if result.outcome != "UNRESOLVED":
-                        cache[candidate] = result
+                        cache[key] = result
                 checkpoint = _commit_progress(
                     checkpoint, attempts, accepted, candidate, len(closure), result, cached
+                )
+                observer.emit(
+                    Observation(
+                        "committed",
+                        "search",
+                        candidate_rows=len(candidate),
+                        retained_rows=len(checkpoint.retained),
+                        attempts=checkpoint.attempt_count,
+                        accepted_changes=checkpoint.accepted_count,
+                        cache_hits=checkpoint.cache_hits,
+                        outcome=cast(ObservationOutcome, result.outcome),
+                        reason=(
+                            "database_invalid"
+                            if result.outcome == "DATABASE_INVALID"
+                            else sanitize_reason(result.reason)
+                        ),
+                    )
                 )
                 if result.outcome == "TARGET_FAILURE":
                     groups = max(1, groups - 1)

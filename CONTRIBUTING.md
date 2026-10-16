@@ -1,5 +1,15 @@
 # Contributing
 
+M2e's opt-in observation and exact-cache changes have a separate bounded
+[performance/differential recipe](benchmarks/README.md). Use fresh output directories,
+verify each worker's imported source provenance, separate timing from tracing, and
+freeze runtime/test/recipe files before integrated validation. Large performance
+runs stay outside ordinary CI. The small installed-wheel consumer exercises progress
+and events alongside unchanged JSON/text inspection and relocated replay. Accepted
+M2d.1 is commit `27be3d46c31f752f8944eb6e78d0f743f4edb9cd`, hosted run
+`38623620343`; its Windows ACL-denial test was capability-skipped. M2e remains
+unstaged/uncommitted and awaits a new hosted gate after Dan's review.
+
 Install Python 3.12+ and uv. Runtime dependencies are standard library only. Development
 tools are resolved in uv.lock; do not hand-edit it. Use synthetic data exclusively.
 
@@ -165,8 +175,8 @@ with Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12 successful.
 M2c was accepted at commit `dd3db90eee65ed10e158cdcc9ef16b8a677e9852` in
 [hosted run 38599450878](https://github.com/chambies2015/ReproSeed/actions/runs/38599450878),
 with Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12 passed.
-Historical completion reports stay unchanged; hosted M2d acceptance remains pending Dan's
-subsequent commit/push. See [alpha readiness](docs/alpha-readiness.md) and
+Historical completion reports stay unchanged; hosted M2e acceptance awaits Dan's
+subsequent commit/push. Accepted M2d.1 evidence is recorded above. See [alpha readiness](docs/alpha-readiness.md) and
 [M2d evidence](docs/m2d-completion.md) for the internal simulation and remaining gates.
 An actual limited-alpha decision and independent outside-user feedback precede broader
 schema/adapters. Do not implement PostgreSQL, LLM integration or web UI, publish packages,

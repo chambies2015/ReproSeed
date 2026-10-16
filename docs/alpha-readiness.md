@@ -19,11 +19,12 @@ and choose their own isolation before acknowledging replay execution.
 
 The conditional verdict requires:
 
-1. Dan reviews the unstaged M2d.1 repair, commits/pushes it, and obtains a successful
+1. Dan reviews the unstaged M2e changes, commits/pushes them, and obtains a successful
    hosted matrix on Ubuntu/Python 3.12, Ubuntu/Python 3.14 and Windows/Python 3.12.
-   M2d run 38613024891 passed both Ubuntu jobs but failed Windows's ACL-denial
-   regression without establishing an effective denial precondition. It did not
-   satisfy the hosted gate; accepted M2c CI does not certify the repair.
+   Accepted M2d.1 commit `27be3d46c31f752f8944eb6e78d0f743f4edb9cd`, hosted run
+   `38623620343`, establishes the prior gate, not the new source. Its Windows
+   ACL-denial test was capability-skipped, separate from local actual-denial and
+   deterministic staging-denial evidence. Historical completion reports are preserved.
 2. At least one independent developer completes the guide and relocated replay
    before widening access beyond an explicitly supervised pilot. Record confusion,
    unsuccessful steps, dependencies and sharing review; address any P0/P1 finding.
@@ -45,8 +46,9 @@ unresolved blocker; NOT TESTED means no relevant execution evidence. See
 [M2d completion](m2d-completion.md) for actual commands, results and intermediate
 failures. The original report preserves its local observations; the
 [M2d.1 completion](m2d1-completion.md) records the permission-precondition repair
-and its separate deterministic and real ACL evidence. Hosted acceptance of M2d.1
-remains pending Dan's new commit and push.
+and its separate deterministic and real ACL evidence. M2d.1's accepted hosted run
+is recorded above; M2e's new hosted gate remains pending Dan's commit and push.
+Agent-generated performance evidence does not replace independent human feedback.
 
 | Gate | Status | Evidence and limit |
 | --- | --- | --- |
@@ -59,11 +61,11 @@ remains pending Dan's new commit and push.
 | G. First-use instructions | PARTIAL | Complete synchronized files and literal shell workflows tested internally, including spaces/Unicode. Independent outside-user feedback remains untested. |
 | H. Useful failure diagnostics | PASS | Installed negative audit checks classification, no inappropriate launch/write/success, bounded output and synthetic secret omission. Curated input causes and human recovery guidance added. The original hosted ACL test did not establish a permission denial, so its successful reduction is not denial-handling evidence; M2d.1 separates the actual permission probe from deterministic staging-denial coverage. |
 | I. Security and data-sharing disclosures | PASS | Focused controlled boundary tests and practical pre-sharing checklist. Temporary data is not securely erased; included code and retained values must be reviewed. |
-| J. Cross-platform execution and cleanup | PARTIAL | Clean Windows and Debian-container runtime evidence; existing POSIX real-signal and Windows injected/Job regressions remain distinct. M2d hosted Ubuntu/Python 3.12 and 3.14 passed; Windows/Python 3.12 failed an unproven ACL-denial precondition. M2d.1 hosted validation and real Windows console Ctrl+C remain unestablished. |
+| J. Cross-platform execution and cleanup | PARTIAL | Prior clean Windows/Debian and accepted M2d.1 hosted evidence remain distinct from M2e. The prior hosted Windows ACL case was capability-skipped. M2e needs its new hosted matrix; real Windows console Ctrl+C remains unestablished. |
 | K. Historical format compatibility | PASS | Genuine archived pre-M1b INTEGER, accepted M2a TEXT and M2b composite version-1 bundles inspected/replayed without rewriting historical reports. |
-| L. CI, contents and distribution metadata | PARTIAL | Wheel/sdist builds, exact runtime/metadata/license/content checks and unchanged hosted matrix with repeatable small consumer smoke. M2d run 38613024891 passed both Ubuntu jobs but failed Windows; the M2d.1 hosted gate awaits Dan's repair commit/push and all three successful jobs. |
+| L. CI, contents and distribution metadata | PARTIAL | Prior wheel/sdist and exact runtime/metadata/license/content checks; unchanged hosted matrix and small consumer smoke extended for observation. M2d.1 hosted gate accepted in run 38623620343. M2e requires Dan's reviewed commit/push and a new successful hosted gate. |
 | M. External dependency limitations | PARTIAL | Missing dependency is UNRESOLVED and replay can differ despite matching hashes. Dependencies/environment remain manually supplied and documented. |
-| N. Remaining public-alpha blockers | PARTIAL | No demonstrated unresolved P0 in this review. Successful hosted M2d.1 CI, independent first-user feedback and Dan's explicit distribution decision remain conditions. |
+| N. Remaining public-alpha blockers | PARTIAL | No demonstrated unresolved P0 in this review. Successful hosted M2e CI, independent first-user feedback and Dan's explicit distribution decision remain conditions. |
 
 ## Significant findings
 
@@ -73,11 +75,11 @@ documented limitation. Absence of a finding is not a proof of universal safety.
 
 | Finding | Severity | Actual evidence and reproduction | User impact / action | Fixed in M2d? |
 | --- | --- | --- | --- | --- |
-| Windows denied output stalled before reporting permissions | P1 | The original local development-console audit recorded a 30-second denied-output stall; M2d replaced tempfile acquisition under the output parent with one exclusive staging-parent mkdir. Hosted run 38613024891 instead created a verified bundle after a successful ACL edit; the original test never probed effective directory-creation denial. | Validate the actual ACL capability before the real CLI denial test, and independently inject denial at the production staging mkdir. Keep no-overwrite and interruption semantics; do not infer a permission bypass from an unmet precondition. | M2d added the production boundary and recorded local exit-2 evidence. M2d.1 repairs the test precondition and reinforces separate deterministic coverage; hosted acceptance remains pending. |
+| Windows denied output stalled before reporting permissions | P1 | The original local audit recorded a 30-second stall; M2d replaced tempfile acquisition with one exclusive staging-parent mkdir. Hosted run 38613024891 created a verified bundle without an effective denial precondition. | Probe actual permission capability and retain independent staging-denial injection. Do not infer a permission bypass from a permitted operation. | M2d.1 accepted in run 38623620343; its hosted Windows actual-denial test was capability-skipped, distinct from local actual-denial and deterministic evidence. |
 | Input error stderr exposed selected input details | P2 | Missing-source reduction echoed an absolute path; unsupported-schema errors could echo schema names. Controlled sentinel regressions now exercise missing source/asset, unknown field, schema and OSError cases. | Curate causes without raw paths/values; preserve classification and direct users to static diagnosis. | Yes: shared input-cause mapping and terminal-safe residual errors; version-1 JSON shapes and exit meanings preserved. |
 | New user entered through checkout/uv instructions | P2 | Original README quickstart required checkout/uv; fresh wheel journey otherwise worked. A local `py -3.12` failed because uv-managed Python was not launcher-registered. | Lead with wheel onboarding, complete files and explicit interpreter recovery; check native exit codes. | Yes: new guide/README, executable synchronization tests and consumer recipe. |
 | Independent first-user evidence absent | P1 condition | Every M2d journey was performed by project agents; no independent developer study ran. | Arrange an outside developer pilot; treat failures as feedback before widening availability. | No; subsequent human activity. |
-| M2d hosted Windows gate failed | P1 condition | Reviewed M2d commit 6aaf7d77d51bb5e6277f16caa3a85e5e3e9574b6 ran in hosted run 38613024891: Ubuntu/Python 3.12 and 3.14 passed, Windows/Python 3.12 failed the ACL-denial test without proving its precondition. This failure alone does not demonstrate a product permission defect. | Dan reviews/commits/pushes M2d.1 and requires all three unchanged hosted jobs to pass. Preserve the original M2d completion report as historical local evidence. | No accepted repair run; pending authorized human commit/push and hosted validation. |
+| M2d hosted Windows gate failed | Prior condition | M2d run 38613024891 failed the unproven ACL-denial precondition. This alone did not demonstrate a product permission defect. | Preserve historical completion evidence and distinguish an actual denial from a capability skip. | Closed by accepted M2d.1 run 38623620343 with the Windows actual-denial case capability-skipped. M2e needs a separate new gate. |
 | Executable bundles are not a sandbox | P2 limitation | Static/acknowledgement/no-launch sentinels and private-payload mutation regressions pass. Review confirms subprocesses inherit permissions/environment; documented Windows startup/Job and POSIX detached-child limitations remain. | Review code and use external isolation for untrusted parties. Do not share secrets or run malicious probes on unrelated resources. | Documented; no OS sandbox promised. |
 | Integrity is relative to the supplied manifest | P2 limitation | Controlled bundle edits plus recomputed hashes can pass static inspection, while new replay reports changed outcomes. | Obtain artifacts from a trusted source. Commit integrity, wheel-byte equality and package publisher authentication are distinct. | Documented; authorship authentication is outside this format. |
 | Dependencies and sensitive content remain explicit responsibilities | P2 limitation | Installed missing-dependency replay produces three UNRESOLVED outcomes; retained SQLite/schema/assets/config remain in the bundle. | Review every declared file/value and disclose/install trusted dependencies. Temporary files are not securely erased. | Documented; no implicit collection or automatic redaction added. |

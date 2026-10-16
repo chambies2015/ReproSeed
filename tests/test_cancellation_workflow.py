@@ -400,7 +400,7 @@ def test_cli_aborts_incomplete_verification_and_cleans_tool_owned_output(
     captured = capsys.readouterr()
     assert code == 130
     assert not captured.out
-    assert "interrupted before a verified bundle could be completed" in captured.err
+    assert "interrupted; use inspect to check any output bundle before replay" in captured.err
     assert len(results) == (1 if boundary == "baseline" else 6 if boundary == "finalization" else 7)
     assert all(result.executed for result in results)
     assert not bundle.exists()

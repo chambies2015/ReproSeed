@@ -335,7 +335,7 @@ def test_further_interrupt_during_counter_recovery_aborts_real_cli_bundle(
         main(["reduce", "--config", str(config.path), "--out", str(bundle), "--allow-exec"]) == 130
     )
     output = capsys.readouterr()
-    assert "interrupted before a verified bundle could be completed" in output.err
+    assert "interrupted; use inspect to check any output bundle before replay" in output.err
     assert not output.out
     assert calls == 4  # Three real baseline confirmations, then one interrupted trial.
     assert not bundle.exists()

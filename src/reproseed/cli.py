@@ -18,6 +18,7 @@ from reproseed.diagnostics import (
     serialize_diagnosis,
 )
 from reproseed.inspection import escape_terminal, format_inspection
+from reproseed.observation import ObservationError, observation_context
 from reproseed.sqlite_adapter import DatabaseError
 from reproseed.workflow import VerificationError
 
@@ -51,6 +52,14 @@ def parser() -> argparse.ArgumentParser:
     )
     reduce.add_argument(
         "--allow-exec", action="store_true", help="execute oracle with your OS permissions"
+    )
+    reduce.add_argument(
+        "--progress", action="store_true", help="write aggregate reduction progress to stderr"
+    )
+    reduce.add_argument(
+        "--events",
+        type=Path,
+        help="exclusively create aggregate JSONL telemetry, relative to the caller's cwd",
     )
     inspect = commands.add_parser(
         "inspect", help="verify hashes and read report; never run the oracle"
@@ -88,7 +97,14 @@ def main(argv: list[str] | None = None) -> int:
             )
             return diagnosis.exit_code
         elif arguments.command == "reduce":
-            report = create_bundle(load_config(arguments.config), arguments.out)
+            config = load_config(arguments.config)
+            if arguments.progress or arguments.events is not None:
+                with observation_context(
+                    config, arguments.out, events=arguments.events, progress=arguments.progress
+                ) as observer:
+                    report = create_bundle(config, arguments.out, observer=observer)
+            else:
+                report = create_bundle(config, arguments.out)
             summary = {
                 key: report[key]
                 for key in (
@@ -111,6 +127,14 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result, indent=2, allow_nan=False))
             return 0 if result["outcome"] == "TARGET_FAILURE" else 1
         return 0
+    except ObservationError as exc:
+        print(f"reproseed: {exc}", file=sys.stderr)
+        print(
+            "Recovery: choose a new event file outside the bundle and inputs, with an "
+            "existing writable parent; event-file parents are never created.",
+            file=sys.stderr,
+        )
+        return 2
     except VerificationError as exc:
         print(f"reproseed: {escape_terminal(str(exc))}", file=sys.stderr)
         print(
@@ -144,7 +168,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     except KeyboardInterrupt:
-        print("reproseed: interrupted before a verified bundle could be completed", file=sys.stderr)
+        print(
+            "reproseed: interrupted; use inspect to check any output bundle before replay",
+            file=sys.stderr,
+        )
         return 130
 
 
